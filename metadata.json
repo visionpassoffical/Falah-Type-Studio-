@@ -1,0 +1,6 @@
+{
+  "name": "Malayalam Print Studio",
+  "description": "Google Docs-style Malayalam rich-text editor with font-locked vector PDF export across A5, A4, A3, B5, Letter, Legal, and Custom paper sizes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

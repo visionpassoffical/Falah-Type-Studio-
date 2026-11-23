@@ -1,0 +1,273 @@
+@import "tailwindcss";
+
+/* SMC Traditional Malayalam DTP Webfonts with Local & Official SMC CDN Sources */
+@font-face {
+  font-family: 'Rachana';
+  src: local('Rachana'), local('Rachana-Regular'),
+       url('https://smc.org.in/downloads/fonts/rachana/Rachana-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Rachana';
+  src: local('Rachana Bold'), local('Rachana-Bold'),
+       url('https://smc.org.in/downloads/fonts/rachana/Rachana-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Meera';
+  src: local('Meera'), local('Meera Regular'), local('Meera-Regular'),
+       url('https://smc.org.in/downloads/fonts/meera/Meera-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Dyuthi';
+  src: local('Dyuthi'), local('Dyuthi Regular'), local('Dyuthi-Regular'),
+       url('https://smc.org.in/downloads/fonts/dyuthi/Dyuthi-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', 'Noto Sans Malayalam', sans-serif;
+    background-color: #F1F3F4;
+    color: #202124;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* Default Malayalam OpenType Conjunct Shaping (allows inline font-family overrides on spans/headings) */
+.malayalam-doc,
+.malayalam-header-footer,
+.malayalam-watermark {
+  font-family: 'Noto Sans Malayalam', sans-serif;
+  font-feature-settings: "kern" 1, "liga" 1, "clig" 1, "calt" 1;
+  text-rendering: optimizeLegibility;
+}
+
+.malayalam-doc *,
+.malayalam-header-footer * {
+  font-feature-settings: "kern" 1, "liga" 1, "clig" 1, "calt" 1;
+  text-rendering: optimizeLegibility;
+}
+
+/* Rich text editor typography & element styling inside the paper sheet */
+.malayalam-doc {
+  outline: none;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  color: #111827;
+}
+
+/* Smart Print Pagination & Typography Precision */
+.malayalam-doc h1,
+.malayalam-doc h2,
+.malayalam-doc h3 {
+  break-after: avoid;
+  page-break-after: avoid;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.malayalam-doc h1 {
+  font-size: 22pt;
+  font-weight: 700;
+  line-height: 1.35;
+  margin-top: 0.4em;
+  margin-bottom: 0.35em;
+  color: #111827;
+}
+
+.malayalam-doc h2 {
+  font-size: 16pt;
+  font-weight: 700;
+  line-height: 1.4;
+  margin-top: 0.6em;
+  margin-bottom: 0.3em;
+  color: #1F2937;
+}
+
+.malayalam-doc h3 {
+  font-size: 13.5pt;
+  font-weight: 600;
+  line-height: 1.45;
+  margin-top: 0.5em;
+  margin-bottom: 0.25em;
+  color: #1F2937;
+}
+
+.malayalam-doc p {
+  margin-top: 0;
+  margin-bottom: 0.45em;
+  orphans: 3;
+  widows: 3;
+}
+
+/* First-line paragraph indent option */
+.malayalam-doc.first-line-indent p {
+  text-indent: 8mm;
+}
+
+.malayalam-doc ul {
+  list-style-type: disc;
+  padding-left: 1.75rem;
+  margin-top: 0.35em;
+  margin-bottom: 0.55em;
+}
+
+.malayalam-doc ol {
+  list-style-type: decimal;
+  padding-left: 1.75rem;
+  margin-top: 0.35em;
+  margin-bottom: 0.55em;
+}
+
+.malayalam-doc li {
+  margin-bottom: 0.2em;
+  orphans: 2;
+  widows: 2;
+}
+
+.malayalam-doc hr.mps-divider {
+  border: 0;
+  border-top: 1.5px solid #374151;
+  margin: 12px 0;
+}
+
+/* Table styling inside the editor with break-inside avoidance */
+.malayalam-doc table.mps-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 10.5pt;
+}
+
+.malayalam-doc table.mps-table tr,
+.malayalam-doc img {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.malayalam-doc table.mps-table th,
+.malayalam-doc table.mps-table td {
+  border: 1px solid #4B5563;
+  padding: 6px 8px;
+  vertical-align: top;
+  min-width: 36px;
+}
+
+.malayalam-doc table.mps-table th {
+  background-color: #F3F4F6;
+  font-weight: 600;
+}
+
+.malayalam-doc table.mps-table.border-heavy th,
+.malayalam-doc table.mps-table.border-heavy td {
+  border: 2px solid #111827;
+}
+
+.malayalam-doc table.mps-table.border-light th,
+.malayalam-doc table.mps-table.border-light td {
+  border: 1px solid #D1D5DB;
+}
+
+.malayalam-doc table.mps-table.border-none th,
+.malayalam-doc table.mps-table.border-none td {
+  border: 1px dashed #E5E7EB;
+}
+
+/* Multi-column layout support */
+.malayalam-doc.cols-2 {
+  column-count: 2;
+  column-gap: 7mm;
+  column-rule: 1px solid #E5E7EB;
+}
+
+.malayalam-doc.cols-3 {
+  column-count: 3;
+  column-gap: 5.5mm;
+  column-rule: 1px solid #E5E7EB;
+}
+
+.malayalam-doc.cols-2 h1,
+.malayalam-doc.cols-3 h1 {
+  column-span: all;
+}
+
+/* Visual manual page break on screen vs print */
+.malayalam-doc .mps-page-break {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 18px 0;
+  padding: 6px 0;
+  border-top: 1.5px dashed #9CA3AF;
+  border-bottom: 1.5px dashed #9CA3AF;
+  background-color: #F8FAFC;
+  color: #64748B;
+  font-size: 9pt;
+  font-weight: 500;
+  user-select: none;
+  page-break-before: always;
+  break-before: page;
+  column-span: all;
+}
+
+/* Selected image or table highlight on screen */
+.malayalam-doc img.mps-selected-img {
+  outline: 2px solid #1A73E8;
+  outline-offset: 2px;
+}
+
+/* Custom thin scrollbar for mobile toolbar */
+.toolbar-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+.toolbar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.toolbar-scroll::-webkit-scrollbar-thumb {
+  background: #DADCE0;
+  border-radius: 4px;
+}
+
+/* Base print media rules (augmented by dynamic-print-style) */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body, html {
+    background: #FFFFFF !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  .malayalam-doc .mps-page-break {
+    border: none !important;
+    background: transparent !important;
+    color: transparent !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+  .malayalam-doc table.mps-table.border-none th,
+  .malayalam-doc table.mps-table.border-none td {
+    border: none !important;
+  }
+  .malayalam-doc img.mps-selected-img {
+    outline: none !important;
+  }
+}
