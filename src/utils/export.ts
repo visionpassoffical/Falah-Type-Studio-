@@ -396,14 +396,14 @@ export function buildCleanPrintableHtmlString(
     @font-face {
       font-family: 'Rachana';
       src: local('Rachana'), local('Rachana Regular'),
-           url('https://smc.org.in/fonts/rachana/Rachana-Regular.woff2') format('woff2');
+           url('https://smc.org.in/downloads/fonts/rachana/Rachana-Regular.woff2') format('woff2');
       font-weight: 400;
       font-display: swap;
     }
     @font-face {
       font-family: 'Meera';
       src: local('Meera'), local('Meera Regular'),
-           url('https://smc.org.in/fonts/meera/Meera-Regular.woff2') format('woff2');
+           url('https://smc.org.in/downloads/fonts/meera/Meera-Regular.woff2') format('woff2');
       font-weight: 400;
       font-display: swap;
     }

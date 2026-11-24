@@ -6,6 +6,7 @@ import {
   PaperSizeKey,
 } from '../types';
 import { MARGIN_PRESETS, PAPER_SIZES } from '../constants/fonts';
+import { normalizeHtmlForPagination } from './documentTools';
 
 const MM_TO_PX = 3.7795275591;
 
@@ -92,25 +93,22 @@ export function calculateUsablePageHeightPx(
 
 /**
  * Measures whether a `.page-content-editable` element overflows its usable height.
- * Compares both scrollHeight and the last child's bottom bounding box against the container bottom.
+ * Strictly uses unscaled CSS layout metrics (`scrollHeight`, `offsetTop`, `offsetHeight`)
+ * instead of `getBoundingClientRect()` or `clientHeight`, so mobile CSS `transform: scale(...)`
+ * never causes false page overflows.
  */
 export function doesPageContentOverflow(
   pageEl: HTMLDivElement,
   usableHeightPx: number
 ): boolean {
-  const maxAllowedHeight = Math.min(usableHeightPx, pageEl.clientHeight || usableHeightPx);
-
-  if (pageEl.scrollHeight > maxAllowedHeight + 1) {
+  if (pageEl.scrollHeight > usableHeightPx + 2) {
     return true;
   }
 
   const lastEl = pageEl.lastElementChild as HTMLElement | null;
   if (lastEl) {
-    const pageRect = pageEl.getBoundingClientRect();
-    const lastRect = lastEl.getBoundingClientRect();
-    const scale = pageEl.offsetWidth > 0 ? pageRect.width / pageEl.offsetWidth : 1;
-    const relativeBottom = (lastRect.bottom - pageRect.top) / (scale || 1);
-    if (relativeBottom > maxAllowedHeight - 2) {
+    const lastBottom = lastEl.offsetTop + lastEl.offsetHeight;
+    if (lastBottom > usableHeightPx) {
       return true;
     }
   }
@@ -191,15 +189,35 @@ function sliceBlockByWordTokens(
     return null;
   }
 
-  for (let i = 0; i < headTextNodes.length; i++) {
-    if (i < targetNodeIndex) {
-      tailTextNodes[i].nodeValue = '';
-    } else if (i === targetNodeIndex) {
-      const fullVal = allTextNodes[i].nodeValue || '';
-      headTextNodes[i].nodeValue = fullVal.slice(0, splitToken.startOffset).trimEnd();
-      tailTextNodes[i].nodeValue = fullVal.slice(splitToken.startOffset);
-    } else {
-      headTextNodes[i].nodeValue = '';
+  try {
+    const headRange = document.createRange();
+    headRange.setStart(headTextNodes[targetNodeIndex], splitToken.startOffset);
+    headRange.setEnd(headEl, headEl.childNodes.length);
+    headRange.deleteContents();
+
+    const tailRange = document.createRange();
+    tailRange.setStart(tailEl, 0);
+    tailRange.setEnd(tailTextNodes[targetNodeIndex], splitToken.startOffset);
+    tailRange.deleteContents();
+
+    // Trim trailing <br> at the end of headEl and leading <br> at the start of tailEl
+    while (headEl.lastChild && headEl.lastChild.nodeName === 'BR') {
+      headEl.removeChild(headEl.lastChild);
+    }
+    while (tailEl.firstChild && tailEl.firstChild.nodeName === 'BR') {
+      tailEl.removeChild(tailEl.firstChild);
+    }
+  } catch {
+    for (let i = 0; i < headTextNodes.length; i++) {
+      if (i < targetNodeIndex) {
+        tailTextNodes[i].nodeValue = '';
+      } else if (i === targetNodeIndex) {
+        const fullVal = allTextNodes[i].nodeValue || '';
+        headTextNodes[i].nodeValue = fullVal.slice(0, splitToken.startOffset).trimEnd();
+        tailTextNodes[i].nodeValue = fullVal.slice(splitToken.startOffset);
+      } else {
+        headTextNodes[i].nodeValue = '';
+      }
     }
   }
 
@@ -359,10 +377,23 @@ export function runZeroCutoffPaginationPass(
   const isEditorFocused = pageEls.some((el) => el && (el === activeEl || el.contains(activeEl)));
   const caretBookmark = isEditorFocused ? saveLogicalCaretPosition(pageEls) : null;
 
-  // Normalize bare top-level text nodes into <p> tags so every child is measurable
+  // Normalize bare top-level text nodes or foreign pasted wrappers into clean direct blocks
   for (let i = 0; i < currentPageCount; i++) {
     const pageEl = pageEls[i];
     if (!pageEl) continue;
+
+    // Detect foreign wrappers (Google Docs <b id="docs-internal-guid-...">, <section>, <article>,
+    // or non-MPS <div> wrapping block elements) and sanitize the page before measuring
+    const hasForeignWrapper = Boolean(
+      pageEl.querySelector(
+        '[id^="docs-internal-guid-"], section, article, main, div:not(.mps-callout-box):not(.mps-chapter-start):not(.mps-quick-block):not(.mps-footnotes-section):not(.mps-page-break):not(.mps-blank-page-marker):not(.mps-blank-page-keeper):not([data-chapter-start="true"]):not([data-blank-page="true"]) > p, div:not(.mps-callout-box):not(.mps-chapter-start):not(.mps-quick-block):not(.mps-footnotes-section):not(.mps-page-break):not(.mps-blank-page-marker):not(.mps-blank-page-keeper):not([data-chapter-start="true"]):not([data-blank-page="true"]) > div'
+      )
+    );
+    if (hasForeignWrapper) {
+      pageEl.innerHTML = normalizeHtmlForPagination(pageEl.innerHTML);
+      didMutateDom = true;
+    }
+
     const childNodes = Array.from(pageEl.childNodes);
     for (const node of childNodes) {
       if (node.nodeType === Node.TEXT_NODE && (node.textContent || '').trim().length > 0) {
@@ -439,7 +470,7 @@ export function runZeroCutoffPaginationPass(
     const usableHeightPx = calculateUsablePageHeightPx(config, i, isChapterOpening);
 
     let guard = 0;
-    while (doesPageContentOverflow(pageEl, usableHeightPx) && guard < 60) {
+    while (doesPageContentOverflow(pageEl, usableHeightPx) && guard < 400) {
       guard++;
       const children = Array.from(pageEl.children) as HTMLElement[];
       if (children.length === 0) break;
@@ -452,7 +483,15 @@ export function runZeroCutoffPaginationPass(
 
       const lastChild = children[children.length - 1];
 
-      // Try splitting the last block at the exact word boundary first
+      // Fast path: if lastChild starts completely below usableHeightPx, push it straight
+      // to nextPageEl without wasting binary-search reflows
+      if (children.length > 1 && lastChild.offsetTop >= usableHeightPx - 4) {
+        nextPageEl.insertBefore(lastChild, nextPageEl.firstChild);
+        didMutateDom = true;
+        continue;
+      }
+
+      // Only split when lastChild actually straddles the bottom boundary of the page
       const tailContinuation = splitBlockAtExactWordBoundary(pageEl, lastChild, usableHeightPx);
       if (tailContinuation) {
         const firstNextChild = nextPageEl.firstElementChild as HTMLElement | null;
@@ -631,9 +670,12 @@ export function paginateHtmlOffscreen(
   host.style.pointerEvents = 'none';
   host.style.zIndex = '-1';
 
+  const normalizedHtml = normalizeHtmlForPagination(combinedHtml);
+
   const styleTag = document.createElement('style');
   styleTag.textContent = `
     .mps-offscreen-page {
+      position: relative;
       box-sizing: border-box;
       width: ${innerWidthPx}px;
       font-family: ${styleOptions.activeFontCssFamily};
@@ -677,49 +719,137 @@ export function paginateHtmlOffscreen(
   document.body.appendChild(host);
 
   try {
+    // Parse normalized HTML into a flat queue of direct block children
+    const staging = document.createElement('div');
+    staging.innerHTML = normalizedHtml;
+    const queue: HTMLElement[] = [];
+    Array.from(staging.childNodes).forEach((node) => {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        queue.push(node as HTMLElement);
+      } else if (
+        node.nodeType === Node.TEXT_NODE &&
+        (node.textContent || '').trim().length > 0
+      ) {
+        const p = document.createElement('p');
+        p.textContent = node.textContent;
+        queue.push(p);
+      }
+    });
+
+    if (queue.length === 0) {
+      return ['<p><br/></p>'];
+    }
+
     const pages: HTMLDivElement[] = [];
-    const createOffscreenPage = (idx: number): HTMLDivElement => {
+    const createOffscreenPage = (
+      idx: number,
+      isChapterOpening = false
+    ): { el: HTMLDivElement; usableH: number } => {
       const div = document.createElement('div');
       div.className = 'mps-offscreen-page';
-      const usableH = calculateUsablePageHeightPx(config, idx, false);
+      const usableH = calculateUsablePageHeightPx(config, idx, isChapterOpening);
       div.style.height = `${usableH}px`;
       host.appendChild(div);
-      return div;
+      pages.push(div);
+      return { el: div, usableH };
     };
 
-    const first = createOffscreenPage(0);
-    first.innerHTML = combinedHtml || '<p><br/></p>';
-    pages.push(first);
+    const firstIsChapter =
+      queue[0].classList.contains('mps-chapter-start') ||
+      queue[0].getAttribute('data-chapter-start') === 'true';
+    let current = createOffscreenPage(0, firstIsChapter);
 
-    // Iteratively allocate & paginate up to 120 pages max
-    for (let pass = 0; pass < 120; pass++) {
-      const { neededPageCount, didMutateDom } = runZeroCutoffPaginationPass(
-        pages,
-        pages.length,
-        config,
-        false
-      );
+    // Synchronous O(N) forward-fill pagination — fills every page cleanly from top to bottom margin
+    let safetyOps = 0;
+    const MAX_OPS = Math.max(5000, queue.length * 12);
 
-      if (neededPageCount > pages.length) {
-        while (pages.length < neededPageCount) {
-          pages.push(createOffscreenPage(pages.length));
+    while (queue.length > 0 && safetyOps < MAX_OPS) {
+      safetyOps++;
+      const block = queue.shift()!;
+
+      // Explicit manual page break
+      if (block.classList.contains('mps-page-break')) {
+        if (current.el.children.length > 0 && queue.length > 0) {
+          const nextIsChapter =
+            queue[0].classList.contains('mps-chapter-start') ||
+            queue[0].getAttribute('data-chapter-start') === 'true';
+          current = createOffscreenPage(pages.length, nextIsChapter);
         }
         continue;
       }
 
-      if (neededPageCount < pages.length) {
-        while (pages.length > neededPageCount) {
-          const removed = pages.pop();
-          removed?.remove();
+      // Explicit inserted blank page
+      if (block.classList.contains('mps-blank-page-marker')) {
+        const blankPage = createOffscreenPage(pages.length, false);
+        blankPage.el.innerHTML =
+          '<div class="mps-blank-page-keeper" data-blank-page="true" contenteditable="false"></div>';
+        if (queue.length > 0) {
+          const nextIsChapter =
+            queue[0].classList.contains('mps-chapter-start') ||
+            queue[0].getAttribute('data-chapter-start') === 'true';
+          current = createOffscreenPage(pages.length, nextIsChapter);
+        } else {
+          current = blankPage;
         }
+        continue;
       }
 
-      if (!didMutateDom) {
+      // Chapter start block always begins at top of a new page
+      const isChapterBlock =
+        block.classList.contains('mps-chapter-start') ||
+        block.getAttribute('data-chapter-start') === 'true';
+      if (isChapterBlock && current.el.children.length > 0) {
+        current = createOffscreenPage(pages.length, true);
+      }
+
+      current.el.appendChild(block);
+
+      if (!doesPageContentOverflow(current.el, current.usableH)) {
+        continue;
+      }
+
+      // Overflow detected: split cleanly at exact word boundary so the page stays full
+      const tailContinuation = splitBlockAtExactWordBoundary(
+        current.el,
+        block,
+        current.usableH
+      );
+
+      if (tailContinuation) {
+        queue.unshift(tailContinuation);
+        current = createOffscreenPage(pages.length, false);
+        continue;
+      }
+
+      // Cannot split this block on the current page: move whole block to next page if page has prior blocks
+      if (current.el.children.length > 1) {
+        current.el.removeChild(block);
+        queue.unshift(block);
+        current = createOffscreenPage(pages.length, isChapterBlock);
+      } else if (queue.length > 0) {
+        // Single oversized unsplittable block (e.g. tall image/table): keep it here and advance page
+        const nextIsChapter =
+          queue[0].classList.contains('mps-chapter-start') ||
+          queue[0].getAttribute('data-chapter-start') === 'true';
+        current = createOffscreenPage(pages.length, nextIsChapter);
+      }
+    }
+
+    // Trim any empty trailing page (preserving intentional blank pages)
+    while (pages.length > 1) {
+      const lastEl = pages[pages.length - 1];
+      const text = (lastEl.innerText || '').trim();
+      const hasMedia = Boolean(
+        lastEl.querySelector('img, table, hr, svg, [data-blank-page="true"]')
+      );
+      if (text.length === 0 && !hasMedia) {
+        pages.pop()?.remove();
+      } else {
         break;
       }
     }
 
-    return pages.map((p) => p.innerHTML);
+    return pages.map((p) => p.innerHTML || '<p><br/></p>');
   } finally {
     host.remove();
   }

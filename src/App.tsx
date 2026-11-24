@@ -86,7 +86,9 @@ import {
   buildQuickBlockHtml,
   captureFormatFromSelection,
   cleanMalayalamSpacingAndBreaks,
+  convertPlainTextToParagraphHtml,
   extractDocumentOutline,
+  normalizeHtmlForPagination,
   resolvePdfPageIndices,
   toggleBookDropCapOnSelection,
 } from './utils/documentTools';
@@ -230,6 +232,7 @@ export function App() {
   });
   const prevPageCountRef = useRef<number>(1);
   const pendingHtmlByPageRef = useRef<string[] | null>(null);
+  const skipNextAutoPaginationRef = useRef<boolean>(false);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const mpsInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -653,7 +656,16 @@ export function App() {
     prevPageCountRef.current = pageCount;
 
     if (!printLayout) {
+      skipNextAutoPaginationRef.current = false;
       updateDocumentMetrics();
+      return;
+    }
+
+    if (skipNextAutoPaginationRef.current) {
+      skipNextAutoPaginationRef.current = false;
+      refreshChapterPageFlags(pageCount);
+      updateDocumentMetrics();
+      persistToLocalStorage();
       return;
     }
 
@@ -666,7 +678,14 @@ export function App() {
       }, 45);
       return () => window.clearTimeout(timer);
     }
-  }, [executePaginationPass, pageCount, printLayout, updateDocumentMetrics]);
+  }, [
+    executePaginationPass,
+    pageCount,
+    persistToLocalStorage,
+    printLayout,
+    refreshChapterPageFlags,
+    updateDocumentMetrics,
+  ]);
 
   // Re-run pagination cleanly when user changes Page Setup or Typography settings in Print Layout mode
   useEffect(() => {
@@ -770,41 +789,110 @@ export function App() {
       const willSwitchMode = nextPrintLayout !== currentPrintLayout;
       setPrintLayout(nextPrintLayout);
 
-      const initialHtml =
+      const rawInitialHtml =
         s.htmlContent && s.htmlContent.trim().length > 0
           ? s.htmlContent
           : '<p><br/></p>';
+      const initialHtml = normalizeHtmlForPagination(rawInitialHtml);
 
       for (let i = 1; i < pageRefs.current.length; i++) {
         const el = pageRefs.current[i];
         if (el) el.innerHTML = '';
       }
-      prevPageCountRef.current = 1;
-      setPageCount(1);
-      setActivePageIndex(0);
+
       pendingCursorOffsetRef.current =
         typeof record.cursorOffset === 'number' ? record.cursorOffset : null;
 
-      if (!willSwitchMode && pageRefs.current[0]) {
-        pageRefs.current[0].innerHTML = initialHtml;
-        if (pendingCursorOffsetRef.current !== null) {
-          const offset = pendingCursorOffsetRef.current;
-          pendingCursorOffsetRef.current = null;
-          window.setTimeout(() => {
-            restoreLogicalCaretPosition([pageRefs.current[0]], {
-              globalCharOffset: offset,
-            });
-          }, 40);
+      if (nextPrintLayout) {
+        const projectFont =
+          MALAYALAM_FONTS.find((f) => f.id === (s.defaultDocFontId || 'manjari')) ||
+          MALAYALAM_FONTS[0];
+        const projectConfig: PaginationConfig = {
+          paperSize: s.paperSize || 'A5',
+          customWidthMm: s.customWidthMm || 148,
+          customHeightMm: s.customHeightMm || 210,
+          orientation: s.orientation || 'portrait',
+          marginPreset: s.marginPreset || 'normal',
+          customMargins: s.margins || { top: 15, right: 15, bottom: 15, left: 15 },
+          showHeaderFooter: Boolean(s.showHeaderFooter),
+          useOddEvenHeaders: Boolean(s.useOddEvenHeaders),
+          hideHeaderOnChapterPages:
+            typeof s.hideHeaderOnChapterPages === 'boolean'
+              ? s.hideHeaderOnChapterPages
+              : true,
+          showPageNumbers:
+            typeof s.showPageNumbers === 'boolean' ? s.showPageNumbers : true,
+          pageNumberPosition: s.pageNumberPosition || 'bottom',
+          differentFirstPage: Boolean(s.differentFirstPage),
+          hasPageBorder: (s.pageBorderStyle || 'double') !== 'none',
+          pageBorderPaddingMm:
+            typeof s.pageBorderPaddingMm === 'number' ? s.pageBorderPaddingMm : 5,
+        };
+        const prePaginated = paginateHtmlOffscreen(initialHtml, projectConfig, {
+          activeFontCssFamily: projectFont.cssFamily,
+          lineSpacing: s.lineSpacing || '1.6',
+          letterSpacing: s.letterSpacing || '0px',
+          firstLineIndent: Boolean(s.firstLineIndent),
+          paragraphGapPt:
+            typeof s.paragraphGapPt === 'number'
+              ? s.paragraphGapPt
+              : s.spaceAfterParagraph === false
+                ? 0
+                : 8,
+          columnCount: s.columnCount || 1,
+          mirrorMargins: Boolean(s.mirrorMargins),
+          innerMarginMm:
+            typeof s.innerMarginMm === 'number' ? s.innerMarginMm : 20,
+          outerMarginMm:
+            typeof s.outerMarginMm === 'number' ? s.outerMarginMm : 13,
+        });
+        const safePages =
+          prePaginated.length > 0 ? prePaginated : ['<p><br/></p>'];
+        skipNextAutoPaginationRef.current = true;
+        pendingHtmlByPageRef.current = safePages;
+        prevPageCountRef.current = safePages.length;
+        setPageCount(safePages.length);
+        setActivePageIndex(0);
+
+        // If already in Print Layout with identical pageCount, hydrate directly now
+        if (!willSwitchMode && safePages.length === pageCount) {
+          for (let i = 0; i < safePages.length; i++) {
+            const el = pageRefs.current[i];
+            if (el) el.innerHTML = safePages[i] || '';
+          }
+          pendingHtmlByPageRef.current = null;
+          skipNextAutoPaginationRef.current = false;
+          refreshChapterPageFlags(safePages.length);
+          updateDocumentMetrics();
+          if (pendingCursorOffsetRef.current !== null) {
+            const offset = pendingCursorOffsetRef.current;
+            pendingCursorOffsetRef.current = null;
+            window.setTimeout(() => {
+              restoreLogicalCaretPosition(
+                pageRefs.current.slice(0, safePages.length),
+                { globalCharOffset: offset }
+              );
+            }, 40);
+          }
         }
       } else {
-        pendingHtmlByPageRef.current = [initialHtml];
-      }
-
-      if (nextPrintLayout) {
-        window.setTimeout(() => {
-          schedulePaginationPass({ immediate: true, fromUserEdit: true });
-        }, 60);
-      } else {
+        prevPageCountRef.current = 1;
+        setPageCount(1);
+        setActivePageIndex(0);
+        if (!willSwitchMode && pageRefs.current[0]) {
+          pageRefs.current[0].innerHTML = initialHtml;
+          if (pendingCursorOffsetRef.current !== null) {
+            const offset = pendingCursorOffsetRef.current;
+            pendingCursorOffsetRef.current = null;
+            window.setTimeout(() => {
+              restoreLogicalCaretPosition([pageRefs.current[0]], {
+                globalCharOffset: offset,
+              });
+            }, 40);
+          }
+        } else {
+          pendingHtmlByPageRef.current = [initialHtml];
+        }
         window.setTimeout(() => {
           updateDocumentMetrics();
         }, 40);
@@ -812,7 +900,8 @@ export function App() {
     },
     [
       clearOscillationLock,
-      schedulePaginationPass,
+      pageCount,
+      refreshChapterPageFlags,
       setAllDocSelected,
       updateDocumentMetrics,
     ]
@@ -1159,7 +1248,7 @@ export function App() {
     return targetPage;
   }, [activePageIndex]);
 
-  // Helper: Toggle Google Docs-style Print Layout ON (Split Pages) / OFF (Continuous Pageless)
+  // Helper: Toggle Google Docs-style Print Layout ON (Instant Offscreen Pre-Pagination) / OFF (Continuous Pageless)
   const handleTogglePrintLayout = useCallback(
     (nextPrintLayout: boolean) => {
       if (nextPrintLayout === printLayout) return;
@@ -1180,22 +1269,60 @@ export function App() {
         printLayout ? pageCount : 1
       );
 
-      pendingHtmlByPageRef.current = [combinedHtml || '<p><br/></p>'];
-      prevPageCountRef.current = 1;
-      setPageCount(1);
-      setActivePageIndex(0);
-      setPrintLayout(nextPrintLayout);
-
-      showToast(
-        nextPrintLayout
-          ? `Print Layout ON (${paperSize} Page View)`
-          : 'Pageless Mode ON (Fast Continuous Typing)'
-      );
+      if (nextPrintLayout) {
+        const normalizedHtml = normalizeHtmlForPagination(combinedHtml);
+        const pagesHtml = paginateHtmlOffscreen(
+          normalizedHtml,
+          getPaginationConfig(),
+          {
+            activeFontCssFamily: activeFont.cssFamily,
+            lineSpacing,
+            letterSpacing,
+            firstLineIndent,
+            paragraphGapPt,
+            columnCount,
+            mirrorMargins,
+            innerMarginMm,
+            outerMarginMm,
+          }
+        );
+        const safePages =
+          pagesHtml.length > 0 ? pagesHtml : ['<p><br/></p>'];
+        skipNextAutoPaginationRef.current = true;
+        pendingHtmlByPageRef.current = safePages;
+        prevPageCountRef.current = safePages.length;
+        setPageCount(safePages.length);
+        setActivePageIndex(0);
+        setPrintLayout(true);
+        showToast(
+          `Print Layout ON (${paperSize} · ${safePages.length} ${
+            safePages.length === 1 ? 'Page' : 'Pages'
+          })`
+        );
+      } else {
+        skipNextAutoPaginationRef.current = false;
+        pendingHtmlByPageRef.current = [combinedHtml || '<p><br/></p>'];
+        prevPageCountRef.current = 1;
+        setPageCount(1);
+        setActivePageIndex(0);
+        setPrintLayout(false);
+        showToast('Pageless Mode ON (Fast Continuous Typing)');
+      }
     },
     [
+      activeFont.cssFamily,
       clearOscillationLock,
+      columnCount,
+      firstLineIndent,
+      getPaginationConfig,
+      innerMarginMm,
+      letterSpacing,
+      lineSpacing,
+      mirrorMargins,
+      outerMarginMm,
       pageCount,
       paperSize,
+      paragraphGapPt,
       printLayout,
       setAllDocSelected,
       showToast,
@@ -2624,6 +2751,9 @@ export function App() {
           if (parsed.htmlContent) {
             clearOscillationLock();
             setAllDocSelected(false);
+            const normalizedImportedHtml = normalizeHtmlForPagination(
+              parsed.htmlContent
+            );
             for (let i = 1; i < pageRefs.current.length; i++) {
               const el = pageRefs.current[i];
               if (el) el.innerHTML = '';
@@ -2631,9 +2761,9 @@ export function App() {
             prevPageCountRef.current = 1;
             setPageCount(1);
             if (!willSwitchMode && pageRefs.current[0]) {
-              pageRefs.current[0].innerHTML = parsed.htmlContent;
+              pageRefs.current[0].innerHTML = normalizedImportedHtml;
             } else {
-              pendingHtmlByPageRef.current = [parsed.htmlContent];
+              pendingHtmlByPageRef.current = [normalizedImportedHtml];
             }
             schedulePaginationPass({ immediate: true, fromUserEdit: true });
           }
@@ -2734,6 +2864,226 @@ export function App() {
     setFindMatchStatus(`Replaced ${replacedCount}`);
     schedulePaginationPass({ fromUserEdit: true });
   }, [findQuery, pageCount, printLayout, replaceQuery, schedulePaginationPass]);
+
+  // Sanitized Paste Handler (strips Google Docs/Word/Web wrappers & foreign layout CSS before pagination)
+  const handlePagePaste = useCallback(
+    (pageIndex: number, e: React.ClipboardEvent<HTMLDivElement>) => {
+      const clipboard = e.clipboardData;
+      if (!clipboard) return;
+
+      const rawHtml = clipboard.getData('text/html') || '';
+      const plainText = clipboard.getData('text/plain') || '';
+      if (!rawHtml && !plainText) return;
+
+      e.preventDefault();
+      clearOscillationLock();
+
+      // If all pages were selected via Ctrl+A, replace the entire document cleanly
+      if (isAllDocSelectedRef.current) {
+        setAllDocSelected(false);
+        for (let i = 1; i < pageRefs.current.length; i++) {
+          const el = pageRefs.current[i];
+          if (el) el.innerHTML = '';
+        }
+        const firstPage = pageRefs.current[0];
+        if (firstPage) {
+          firstPage.innerHTML = '';
+          firstPage.focus();
+          const sel = window.getSelection();
+          if (sel) {
+            const range = document.createRange();
+            range.selectNodeContents(firstPage);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+        }
+      }
+
+      const targetPage =
+        pageRefs.current[printLayout ? pageIndex : 0] || pageRefs.current[0];
+      if (!targetPage) return;
+
+      let sanitizedBlockHtml: string | null = null;
+      let inlineInsertHtml: string | null = null;
+
+      if (rawHtml.trim().length > 0) {
+        const cleaned = normalizeHtmlForPagination(rawHtml);
+        const temp = document.createElement('div');
+        temp.innerHTML = cleaned;
+        // If pasting a single short paragraph without <br> into an existing sentence, insert inline
+        if (
+          temp.children.length === 1 &&
+          temp.firstElementChild?.tagName.toUpperCase() === 'P' &&
+          !temp.firstElementChild.querySelector('br, img, table')
+        ) {
+          inlineInsertHtml = temp.firstElementChild.innerHTML;
+        } else {
+          sanitizedBlockHtml = cleaned;
+        }
+      } else {
+        const paraHtml = convertPlainTextToParagraphHtml(plainText);
+        if (paraHtml) {
+          sanitizedBlockHtml = paraHtml;
+        } else {
+          // Single-line plain text — insert cleanly inline at the caret
+          const escaped = plainText
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+          inlineInsertHtml = escaped;
+        }
+      }
+
+      const sel = window.getSelection();
+      if (inlineInsertHtml !== null) {
+        if (sel && sel.rangeCount > 0 && targetPage.contains(sel.anchorNode)) {
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          const frag = range.createContextualFragment(inlineInsertHtml);
+          const lastInserted = frag.lastChild;
+          range.insertNode(frag);
+          if (lastInserted) {
+            const after = document.createRange();
+            after.setStartAfter(lastInserted);
+            after.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(after);
+          }
+        } else {
+          document.execCommand('insertHTML', false, inlineInsertHtml);
+        }
+      } else if (sanitizedBlockHtml) {
+        // Insert normalized top-level blocks directly as children of targetPage (never nested inside <p>)
+        const temp = document.createElement('div');
+        temp.innerHTML = sanitizedBlockHtml;
+        const nodesToInsert = Array.from(temp.childNodes);
+
+        if (nodesToInsert.length > 0) {
+          const frag = document.createDocumentFragment();
+          nodesToInsert.forEach((n) => frag.appendChild(n));
+          const lastInserted = frag.lastChild;
+
+          let inserted = false;
+          if (sel && sel.rangeCount > 0 && targetPage.contains(sel.anchorNode)) {
+            const range = sel.getRangeAt(0);
+            range.deleteContents();
+
+            // Find the direct child block of targetPage containing the caret
+            let directChild: Node | null = range.startContainer;
+            while (directChild && directChild.parentNode !== targetPage) {
+              directChild = directChild.parentNode;
+            }
+
+            if (directChild && directChild.parentNode === targetPage) {
+              const isDirectEmpty =
+                (directChild.textContent || '').trim().length === 0 &&
+                !(
+                  directChild.nodeType === Node.ELEMENT_NODE &&
+                  (directChild as HTMLElement).querySelector('img, table, hr')
+                );
+              if (isDirectEmpty) {
+                targetPage.insertBefore(frag, directChild);
+                targetPage.removeChild(directChild);
+              } else {
+                // Split remaining content after caret into a trailing paragraph if mid-paragraph
+                const tailRange = document.createRange();
+                tailRange.setStart(range.startContainer, range.startOffset);
+                tailRange.setEndAfter(directChild);
+                const tailFrag = tailRange.extractContents();
+                const tailText = (tailFrag.textContent || '').trim();
+
+                targetPage.insertBefore(frag, directChild.nextSibling);
+                if (tailText.length > 0 && lastInserted && lastInserted.parentNode === targetPage) {
+                  targetPage.insertBefore(tailFrag, lastInserted.nextSibling);
+                }
+              }
+              inserted = true;
+            }
+          }
+
+          if (!inserted) {
+            targetPage.appendChild(frag);
+          }
+
+          if (sel && lastInserted) {
+            try {
+              const after = document.createRange();
+              after.selectNodeContents(lastInserted);
+              after.collapse(false);
+              sel.removeAllRanges();
+              sel.addRange(after);
+            } catch {
+              // Ignore selection placement edge case
+            }
+          }
+        }
+      }
+
+      // If Print Layout is ON and a large paste arrived, run instant offscreen pre-pagination
+      // in one single state update instead of stepping page-by-page in the live DOM
+      const pastedLen = Math.max(plainText.length, sanitizedBlockHtml?.length || 0);
+      if (printLayout && pastedLen > 1200) {
+        const combined = getCombinedLogicalPagesHtml(pageRefs.current, pageCount);
+        const normalizedAll = normalizeHtmlForPagination(combined);
+        const pagesHtml = paginateHtmlOffscreen(
+          normalizedAll,
+          getPaginationConfig(),
+          {
+            activeFontCssFamily: activeFont.cssFamily,
+            lineSpacing,
+            letterSpacing,
+            firstLineIndent,
+            paragraphGapPt,
+            columnCount,
+            mirrorMargins,
+            innerMarginMm,
+            outerMarginMm,
+          }
+        );
+        const safePages =
+          pagesHtml.length > 0 ? pagesHtml : ['<p><br/></p>'];
+        skipNextAutoPaginationRef.current = true;
+        pendingHtmlByPageRef.current = safePages;
+        prevPageCountRef.current = safePages.length;
+        setPageCount(safePages.length);
+        if (safePages.length === pageCount) {
+          for (let i = 0; i < safePages.length; i++) {
+            const el = pageRefs.current[i];
+            if (el) el.innerHTML = safePages[i] || '';
+          }
+          pendingHtmlByPageRef.current = null;
+          skipNextAutoPaginationRef.current = false;
+          refreshChapterPageFlags(safePages.length);
+          updateDocumentMetrics();
+          persistToLocalStorage();
+        }
+        return;
+      }
+
+      schedulePaginationPass({ fromUserEdit: true });
+    },
+    [
+      activeFont.cssFamily,
+      clearOscillationLock,
+      columnCount,
+      firstLineIndent,
+      getPaginationConfig,
+      innerMarginMm,
+      letterSpacing,
+      lineSpacing,
+      mirrorMargins,
+      outerMarginMm,
+      pageCount,
+      paragraphGapPt,
+      persistToLocalStorage,
+      printLayout,
+      refreshChapterPageFlags,
+      schedulePaginationPass,
+      setAllDocSelected,
+      updateDocumentMetrics,
+    ]
+  );
 
   // Page Keyboard Navigation + Document-Wide Ctrl+A / Cmd+A, Backspace, Copy & Cut across all pages
   const handlePageKeyDown = useCallback(
@@ -3271,6 +3621,7 @@ export function App() {
         onPageInput={() => {
           schedulePaginationPass({ fromUserEdit: true });
         }}
+        onPagePaste={handlePagePaste}
         onPageKeyDown={handlePageKeyDown}
         onPageClick={handlePageClick}
         onCompositionStart={() => {

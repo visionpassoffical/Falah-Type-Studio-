@@ -64,6 +64,7 @@ export interface PageCanvasProps {
   onExitReadingMode: () => void;
   onPageFocus: (pageIndex: number) => void;
   onPageInput: (pageIndex: number) => void;
+  onPagePaste: (pageIndex: number, e: React.ClipboardEvent<HTMLDivElement>) => void;
   onPageKeyDown: (pageIndex: number, e: React.KeyboardEvent<HTMLDivElement>) => void;
   onPageClick: (pageIndex: number, e: React.MouseEvent<HTMLDivElement>) => void;
   onCompositionStart: () => void;
@@ -120,6 +121,7 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
   onExitReadingMode,
   onPageFocus,
   onPageInput,
+  onPagePaste,
   onPageKeyDown,
   onPageClick,
   onCompositionStart,
@@ -303,6 +305,7 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
               data-page-index={0}
               onFocus={() => onPageFocus(0)}
               onInput={() => onPageInput(0)}
+              onPaste={(e) => onPagePaste(0, e)}
               onKeyDown={(e) => onPageKeyDown(0, e)}
               onClick={(e) => onPageClick(0, e)}
               onCompositionStart={onCompositionStart}
@@ -357,6 +360,21 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
             !omitOnFirstPage &&
             (showHeaderFooter ||
               (showPageNumbers && pageNumberPosition === 'bottom'));
+
+          const usablePageHeightPx = Math.max(
+            120,
+            Math.floor(
+              unscaledPageHeightPx -
+                effMargins.top * mmToPx -
+                effMargins.bottom * mmToPx -
+                (hasTopHeaderArea ? 30 : 0) -
+                (hasBottomFooterArea ? 30 : 0) -
+                (pageBorderStyle !== 'none'
+                  ? pageBorderPaddingMm * 2 * mmToPx
+                  : 0) -
+                14
+            )
+          );
 
           const resolvedNumberAlign: 'left' | 'center' | 'right' =
             pageNumberAlign === 'outer'
@@ -575,6 +593,7 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
                     data-page-index={pageIndex}
                     onFocus={() => onPageFocus(pageIndex)}
                     onInput={() => onPageInput(pageIndex)}
+                    onPaste={(e) => onPagePaste(pageIndex, e)}
                     onKeyDown={(e) => onPageKeyDown(pageIndex, e)}
                     onClick={(e) => onPageClick(pageIndex, e)}
                     onCompositionStart={onCompositionStart}
@@ -583,6 +602,7 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
                       readingMode ? 'text-[#2B2318]' : 'text-gray-900'
                     }`}
                     style={{
+                      maxHeight: `${usablePageHeightPx}px`,
                       fontFamily: activeFontCssFamily,
                       lineHeight: lineSpacing,
                       letterSpacing,
