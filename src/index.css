@@ -243,6 +243,25 @@
   border-radius: 4px;
 }
 
+/* True Split Page Sheets (Google Docs Print Layout) */
+.pages-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.page-sheet {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
+  border: 1px solid #DADCE0;
+}
+
 /* Base print media rules (augmented by dynamic-print-style) */
 @media print {
   .no-print {
@@ -252,6 +271,25 @@
     background: #FFFFFF !important;
     margin: 0 !important;
     padding: 0 !important;
+  }
+  .pages-stack {
+    display: block !important;
+    gap: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+  .page-sheet {
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+  .page-sheet:not(:last-child) {
+    break-after: page !important;
+    page-break-after: always !important;
   }
   .malayalam-doc .mps-page-break {
     border: none !important;
