@@ -49,6 +49,8 @@ export interface ExportDocumentContext {
   pageNumberPosition: PageNumberPosition;
   pageNumberAlign: PageNumberAlign;
   pageNumberFormat: PageNumberFormat;
+  /** Optional 0-based page indices to include (for Current Page / Custom Page Range PDF export) */
+  selectedPageIndices?: number[];
 }
 
 /**
@@ -165,8 +167,20 @@ export function getCombinedLogicalPagesHtml(
     const el = pageEls[i];
     if (!el) continue;
     const clone = el.cloneNode(true) as HTMLDivElement;
-    const children = Array.from(clone.children) as HTMLElement[];
-    for (const child of children) {
+    // Normalize any bare top-level text nodes so no text is ever dropped
+    const rawNodes = Array.from(clone.childNodes);
+    for (const node of rawNodes) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent || '';
+        if (text.trim().length > 0) {
+          const p = document.createElement('p');
+          p.textContent = text;
+          wrapper.appendChild(p);
+        }
+        continue;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+      const child = node as HTMLElement;
       const prevLast = wrapper.lastElementChild as HTMLElement | null;
       if (
         child.getAttribute('data-split-continuation') === 'true' &&
@@ -205,10 +219,14 @@ export function buildCleanPrintableHtmlString(
   const finalWidthMm = ctx.orientation === 'portrait' ? rawW : rawH;
   const finalHeightMm = ctx.orientation === 'portrait' ? rawH : rawW;
 
-  const pageCssSize =
-    ctx.paperSize === 'Custom'
-      ? `${finalWidthMm}mm ${finalHeightMm}mm`
-      : `${ctx.paperSize} ${ctx.orientation}`;
+  const isStandardCssPageKeyword =
+    ctx.paperSize === 'A5' ||
+    ctx.paperSize === 'A4' ||
+    ctx.paperSize === 'A3' ||
+    ctx.paperSize === 'B5';
+  const pageCssSize = isStandardCssPageKeyword
+    ? `${ctx.paperSize} ${ctx.orientation}`
+    : `${finalWidthMm}mm ${finalHeightMm}mm`;
 
   const bgHex = ctx.printBackgroundTint
     ? PAPER_TINTS[ctx.paperTint].hex
@@ -347,8 +365,20 @@ export function buildCleanPrintableHtmlString(
       </div>`;
   };
 
-  const pagesMarkup = ctx.pageHtmlList
-    .map((pageHtml, idx) => renderSinglePageSheetHtml(pageHtml, idx))
+  const indicesToExport =
+    ctx.selectedPageIndices && ctx.selectedPageIndices.length > 0
+      ? ctx.selectedPageIndices.filter(
+          (i) => i >= 0 && i < ctx.pageHtmlList.length
+        )
+      : ctx.pageHtmlList.map((_, idx) => idx);
+
+  const safeIndices =
+    indicesToExport.length > 0 ? indicesToExport : [0];
+
+  const pagesMarkup = safeIndices
+    .map((origIdx) =>
+      renderSinglePageSheetHtml(ctx.pageHtmlList[origIdx] || '', origIdx)
+    )
     .join('\n');
 
   const paragraphGapVal = `${ctx.paragraphGapPt}pt`;
@@ -426,22 +456,30 @@ export function buildCleanPrintableHtmlString(
       display: flex;
       justify-content: space-between;
       align-items: center;
+      height: 24px;
+      min-height: 24px;
+      max-height: 24px;
+      overflow: hidden;
+      white-space: nowrap;
       font-size: 8.5pt;
       color: #4B5563;
       border-bottom: 0.5pt solid #D1D5DB;
-      padding-bottom: 1.5mm;
-      margin-bottom: 3mm;
+      margin-bottom: 6px;
       flex-shrink: 0;
     }
     .page-footer-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      height: 24px;
+      min-height: 24px;
+      max-height: 24px;
+      overflow: hidden;
+      white-space: nowrap;
       font-size: 8.5pt;
       color: #4B5563;
       border-top: 0.5pt solid #D1D5DB;
-      padding-top: 1.5mm;
-      margin-top: 3mm;
+      margin-top: 6px;
       flex-shrink: 0;
     }
     .page-body-content {
@@ -500,6 +538,93 @@ export function buildCleanPrintableHtmlString(
       border: none;
       border-top: 1pt solid #6B7280;
       margin: 0.65em 0;
+    }
+    .page-body-content .mps-drop-cap-char {
+      float: left;
+      font-size: 3.1em;
+      line-height: 0.88;
+      font-weight: 700;
+      padding-top: 0.08em;
+      padding-right: 0.16em;
+      padding-bottom: 0.04em;
+      color: #111827;
+    }
+    .page-body-content .mps-callout-box {
+      background-color: #F8FAFC;
+      border: 1pt solid #94A3B8;
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin: 10px 0;
+      text-indent: 0 !important;
+      break-inside: avoid;
+    }
+    .page-body-content .mps-callout-box p {
+      text-indent: 0 !important;
+      margin-bottom: 4px;
+    }
+    .page-body-content sup.mps-fn-ref {
+      font-size: 0.72em;
+      font-weight: 700;
+      color: #1A73E8;
+      vertical-align: super;
+      line-height: 0;
+    }
+    .page-body-content .mps-footnotes-section {
+      margin-top: 14px;
+      padding-top: 8px;
+      border-top: 0.8pt solid #9CA3AF;
+      font-size: 8.8pt;
+      line-height: 1.45;
+      color: #374151;
+    }
+    .page-body-content .mps-footnotes-section p {
+      text-indent: 0 !important;
+      margin-bottom: 3px;
+    }
+    .page-body-content figure.mps-figure {
+      margin: 8px 0;
+      max-width: 100%;
+      break-inside: avoid;
+    }
+    .page-body-content figure.mps-figure.mps-wrap-center {
+      display: block;
+      text-align: center;
+      clear: both;
+      margin: 10px auto;
+    }
+    .page-body-content figure.mps-figure.mps-wrap-inline {
+      display: inline-block;
+      vertical-align: middle;
+      margin: 4px 6px;
+    }
+    .page-body-content figure.mps-figure.mps-wrap-float-left {
+      float: left;
+      margin: 4px 14px 8px 0;
+    }
+    .page-body-content figure.mps-figure.mps-wrap-float-right {
+      float: right;
+      margin: 4px 0 8px 14px;
+    }
+    .page-body-content figcaption.mps-img-caption {
+      margin-top: 4px;
+      font-size: 8.8pt;
+      font-style: italic;
+      color: #4B5563;
+      text-align: center;
+    }
+    .page-body-content img.mps-img-border-thin {
+      border: 1pt solid #374151;
+      padding: 2px;
+      background: #FFFFFF;
+    }
+    .page-body-content img.mps-img-border-frame {
+      border: 1.5pt solid #1F2937;
+      padding: 4px;
+      background: #FFFFFF;
+    }
+    .page-body-content .mps-blank-page-marker,
+    .page-body-content .mps-blank-page-keeper {
+      display: none !important;
     }
     .watermark {
       position: absolute;
@@ -939,13 +1064,64 @@ export function exportBookletImpositionHtml(ctx: ExportDocumentContext): void {
 }
 
 /**
- * Triggers native vector PDF print via `window.print()` after fonts are ready.
+ * Triggers native vector PDF print via `window.print()` after fonts are ready
+ * (used when Print Layout split pages are mounted on screen).
  */
 export async function printVectorPdfDocument(): Promise<void> {
   if (document.fonts && document.fonts.ready) {
     await document.fonts.ready;
   }
   window.print();
+}
+
+/**
+ * Prints the full paginated A5/A4/Demy vector PDF via a clean hidden iframe
+ * (used when Print Layout is OFF / Pageless Mode so exported PDFs always
+ * render with exact physical page sizes, closed borders, mirror margins, and headers/footers).
+ */
+export async function printPaginatedHtmlDocument(
+  ctx: ExportDocumentContext
+): Promise<void> {
+  const html = buildCleanPrintableHtmlString(ctx, false);
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  iframe.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(iframe);
+
+  const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!iframeDoc || !iframe.contentWindow) {
+    document.body.removeChild(iframe);
+    await printVectorPdfDocument();
+    return;
+  }
+
+  iframeDoc.open();
+  iframeDoc.write(html);
+  iframeDoc.close();
+
+  const trigger = () => {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } finally {
+      window.setTimeout(() => {
+        if (iframe.parentNode) {
+          iframe.parentNode.removeChild(iframe);
+        }
+      }, 4000);
+    }
+  };
+
+  if (iframeDoc.fonts && iframeDoc.fonts.ready) {
+    iframeDoc.fonts.ready.then(() => window.setTimeout(trigger, 250));
+  } else {
+    window.setTimeout(trigger, 450);
+  }
 }
 
 /**

@@ -15,6 +15,8 @@ import {
 } from '../utils/export';
 
 export interface PageCanvasProps {
+  printLayout: boolean;
+  isAllDocSelected: boolean;
   pageCount: number;
   activePageIndex: number;
   pageRefs: React.MutableRefObject<(HTMLDivElement | null)[]>;
@@ -58,6 +60,8 @@ export interface PageCanvasProps {
   pageNumberAlign: PageNumberAlign;
   pageNumberFormat: PageNumberFormat;
   darkMode: boolean;
+  readingMode: boolean;
+  onExitReadingMode: () => void;
   onPageFocus: (pageIndex: number) => void;
   onPageInput: (pageIndex: number) => void;
   onPageKeyDown: (pageIndex: number, e: React.KeyboardEvent<HTMLDivElement>) => void;
@@ -68,6 +72,8 @@ export interface PageCanvasProps {
 }
 
 export const PageCanvas: React.FC<PageCanvasProps> = ({
+  printLayout,
+  isAllDocSelected,
   pageCount,
   activePageIndex,
   pageRefs,
@@ -110,6 +116,8 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
   pageNumberAlign,
   pageNumberFormat,
   darkMode,
+  readingMode,
+  onExitReadingMode,
   onPageFocus,
   onPageInput,
   onPageKeyDown,
@@ -130,10 +138,11 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
     pageBorderPaddingMm
   );
 
-  const paperBgHex = PAPER_TINTS[paperTint].hex;
+  // Warm eye-protection sepia paper when Reading / Proofread Mode is active
+  const paperBgHex = readingMode ? '#F7F1E1' : PAPER_TINTS[paperTint].hex;
 
   const rulerTicks: number[] = [];
-  if (showRuler) {
+  if (showRuler && !readingMode) {
     for (let cm = 0; cm <= Math.floor(finalWidthMm / 10); cm++) {
       rulerTicks.push(cm);
     }
@@ -143,10 +152,28 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
     <div
       ref={workspaceRef}
       onClick={onBackgroundClick}
-      className={`workspace-scroll flex-1 overflow-y-auto overflow-x-hidden px-2 pt-3 pb-32 transition-colors ${
-        darkMode ? 'bg-[#12151B]' : 'bg-[#E8EAED]'
+      className={`workspace-scroll relative flex-1 overflow-y-auto overflow-x-hidden px-2 pt-3 transition-colors ${
+        readingMode
+          ? 'bg-[#E9DEC9] pb-16'
+          : darkMode
+            ? 'bg-[#12151B] pb-32'
+            : 'bg-[#E8EAED] pb-32'
       }`}
     >
+      {readingMode && (
+        <div className="no-print fixed top-3 right-3 z-40 flex items-center gap-2">
+          <span className="rounded-full bg-[#3B2F22]/85 px-3 py-1.5 text-[11px] font-semibold text-[#F7F1E1] shadow-md backdrop-blur-xs">
+            Sepia Proofread Mode
+          </span>
+          <button
+            type="button"
+            onClick={onExitReadingMode}
+            className="rounded-full bg-[#1A73E8] px-3.5 py-1.5 text-xs font-bold text-white shadow-md transition hover:bg-blue-700 active:scale-95"
+          >
+            Exit Reading Mode
+          </button>
+        </div>
+      )}
       <style>{`
         .page-content-editable p {
           margin-top: 0;
@@ -223,8 +250,81 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
           height: auto;
           border-radius: 3px;
         }
+        .page-content-editable .mps-page-break {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin: 14px 0;
+          padding: 4px 0;
+          border-top: 1.5px dashed #9CA3AF;
+          border-bottom: 1.5px dashed #9CA3AF;
+          background-color: rgba(241, 245, 249, 0.85);
+          color: #64748B;
+          font-size: 8.5pt;
+          font-weight: 600;
+          user-select: none;
+        }
       `}</style>
 
+      {/* =================================================================== */}
+      {/* PAGELESS / CONTINUOUS MODE (printLayout === false)                  */}
+      {/* Lag-free single continuous sheet for fast Malayalam typing          */}
+      {/* =================================================================== */}
+      {!printLayout ? (
+        <div className="mx-auto flex w-full max-w-[780px] flex-col items-center">
+          <div
+            className={`w-full rounded-xl border px-4 py-5 shadow-xs transition-shadow sm:px-8 sm:py-7 ${
+              isAllDocSelected
+                ? 'ring-2 ring-[#1A73E8]/70'
+                : readingMode
+                  ? 'border-[#D9CCB2]'
+                  : darkMode
+                    ? 'border-[#2E3440]'
+                    : 'border-gray-200/90'
+            }`}
+            style={{
+              backgroundColor: readingMode
+                ? '#F7F1E1'
+                : darkMode
+                  ? '#1A1E26'
+                  : paperBgHex,
+              minHeight: 'calc(100dvh - 140px)',
+              fontFamily: activeFontCssFamily,
+            }}
+          >
+            <div
+              key="pageless-continuous-editor"
+              ref={(el) => {
+                pageRefs.current[0] = el;
+              }}
+              contentEditable={!readingMode}
+              suppressContentEditableWarning
+              spellCheck={false}
+              data-page-index={0}
+              onFocus={() => onPageFocus(0)}
+              onInput={() => onPageInput(0)}
+              onKeyDown={(e) => onPageKeyDown(0, e)}
+              onClick={(e) => onPageClick(0, e)}
+              onCompositionStart={onCompositionStart}
+              onCompositionEnd={() => onCompositionEnd(0)}
+              className={`page-content-editable relative min-h-[calc(100dvh-200px)] w-full text-[12pt] focus:outline-none ${
+                readingMode
+                  ? 'text-[#2B2318]'
+                  : darkMode
+                    ? 'text-gray-100'
+                    : 'text-gray-900'
+              }`}
+              style={{
+                fontFamily: activeFontCssFamily,
+                lineHeight: lineSpacing,
+                letterSpacing,
+                wordBreak: 'break-word',
+                overflowWrap: 'anywhere',
+              }}
+            />
+          </div>
+        </div>
+      ) : (
       <div className="pages-stack mx-auto flex flex-col items-center gap-[18px]">
         {Array.from({ length: pageCount }).map((_, pageIndex) => {
           const pageNumber = pageIndex + 1;
@@ -290,7 +390,7 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
 
           return (
             <div
-              key={pageIndex}
+              key={`print-page-${pageIndex}`}
               className="page-scale-slot relative flex flex-col items-center"
               style={{
                 width: `${scaledWidthPx}px`,
@@ -330,7 +430,11 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
 
               <div
                 className={`page-sheet relative flex flex-col justify-between transition-shadow ${
-                  isActivePage ? 'ring-1 ring-[#1A73E8]/40' : ''
+                  isAllDocSelected
+                    ? 'ring-2 ring-[#1A73E8]/70'
+                    : isActivePage
+                      ? 'ring-1 ring-[#1A73E8]/40'
+                      : ''
                 }`}
                 style={{
                   width: `${finalWidthMm}mm`,
@@ -392,7 +496,16 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
                   style={borderStyleObj}
                 >
                   {hasTopHeaderArea && (
-                    <div className="mb-2 flex shrink-0 items-center justify-between border-b border-gray-300/80 pb-1 text-[8.5pt] text-gray-600">
+                    <div
+                      className="mb-[6px] flex shrink-0 items-center justify-between border-b border-gray-300/80 text-[8.5pt] text-gray-600"
+                      style={{
+                        height: '24px',
+                        minHeight: '24px',
+                        maxHeight: '24px',
+                        overflow: 'hidden',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
                       {showPageNumbers &&
                         pageNumberPosition === 'top' &&
                         resolvedNumberAlign === 'left' && (
@@ -456,7 +569,7 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
                     ref={(el) => {
                       pageRefs.current[pageIndex] = el;
                     }}
-                    contentEditable
+                    contentEditable={!readingMode}
                     suppressContentEditableWarning
                     spellCheck={false}
                     data-page-index={pageIndex}
@@ -466,7 +579,9 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
                     onClick={(e) => onPageClick(pageIndex, e)}
                     onCompositionStart={onCompositionStart}
                     onCompositionEnd={() => onCompositionEnd(pageIndex)}
-                    className="page-content-editable relative flex-1 overflow-hidden text-[11.5pt] text-gray-900 focus:outline-none"
+                    className={`page-content-editable relative flex-1 overflow-hidden text-[11.5pt] focus:outline-none ${
+                      readingMode ? 'text-[#2B2318]' : 'text-gray-900'
+                    }`}
                     style={{
                       fontFamily: activeFontCssFamily,
                       lineHeight: lineSpacing,
@@ -481,7 +596,16 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
                   />
 
                   {hasBottomFooterArea && (
-                    <div className="mt-2 flex shrink-0 items-center justify-between border-t border-gray-300/80 pt-1 text-[8.5pt] text-gray-600">
+                    <div
+                      className="mt-[6px] flex shrink-0 items-center justify-between border-t border-gray-300/80 text-[8.5pt] text-gray-600"
+                      style={{
+                        height: '24px',
+                        minHeight: '24px',
+                        maxHeight: '24px',
+                        overflow: 'hidden',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
                       {showPageNumbers &&
                         pageNumberPosition === 'bottom' &&
                         resolvedNumberAlign === 'left' && (
@@ -546,6 +670,7 @@ export const PageCanvas: React.FC<PageCanvasProps> = ({
           );
         })}
       </div>
+      )}
     </div>
   );
 };

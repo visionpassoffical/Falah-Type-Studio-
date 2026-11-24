@@ -8,11 +8,16 @@ import {
   BookOpen,
   BookmarkPlus,
   Check,
+  CheckSquare,
   ChevronLeft,
   ChevronRight,
   Columns,
+  Copy,
   Download,
+  Eraser,
+  Eye,
   FileCode,
+  FilePlus,
   FileSpreadsheet,
   FileText,
   FolderOpen,
@@ -21,9 +26,12 @@ import {
   Italic,
   List,
   ListOrdered,
+  ListTree,
+  MessageSquarePlus,
   Minus,
   Moon,
   Outdent,
+  Paintbrush,
   Palette,
   Printer,
   RemoveFormatting,
@@ -47,6 +55,8 @@ import {
   BookFrontMatterKey,
   DocumentMetrics,
   FormatTab,
+  ImageBorderMode,
+  ImageWrapMode,
   MalayalamFontOption,
   MarginPresetKey,
   MarginsMm,
@@ -58,6 +68,8 @@ import {
   PageNumberPosition,
   PaperSizeKey,
   PaperTintKey,
+  PdfPageRangeMode,
+  QuickBlockKey,
 } from '../types';
 import {
   FONT_CATEGORIES,
@@ -72,6 +84,8 @@ import {
   PARAGRAPH_STYLES,
   TEXT_COLOR_PALETTE,
 } from '../constants/fonts';
+import { SPECIAL_SYMBOLS_PALETTE } from '../utils/documentTools';
+import { ImageToolbar } from './ImageToolbar';
 
 export interface BottomSheetsProps {
   activeDrawer: ActiveDrawer;
@@ -90,6 +104,13 @@ export interface BottomSheetsProps {
   pageCount: number;
   zoomMode: 'fit' | '100';
   setZoomMode: (mode: 'fit' | '100') => void;
+  printLayout: boolean;
+  onTogglePrintLayout: (val: boolean) => void;
+  onSelectAllDocument: () => void;
+  isAllDocSelected: boolean;
+  onCopyAllDocument: () => void;
+  onClearAllDocument: () => void;
+  onClearSelectionState: () => void;
 
   // Font & Text Formatting
   activeFont: MalayalamFontOption;
@@ -113,13 +134,33 @@ export interface BottomSheetsProps {
   setFirstLineIndent: (val: boolean) => void;
   onApplyBookTypography: () => void;
 
-  // Contextual Table & Image Controls
+  // Contextual Table & Advanced WPS Image Controls
   activeTableCell: HTMLTableCellElement | null;
   onTableAction: (action: 'add-row' | 'del-row' | 'add-col' | 'del-col' | 'del-table') => void;
   activeImageEl: HTMLImageElement | null;
   onImageResize: (widthPercent: number) => void;
-  onImageAlign: (align: 'left' | 'center' | 'right') => void;
+  onImageWrapChange: (wrap: ImageWrapMode) => void;
+  onImageBorderChange: (border: ImageBorderMode) => void;
+  onImageCaptionChange: (caption: string) => void;
   onDeleteActiveImage: () => void;
+  onClearActiveImage: () => void;
+
+  // Google Docs & WPS Office Tools
+  isFormatPainterActive: boolean;
+  onToggleFormatPainter: () => void;
+  onToggleDropCap: () => void;
+  onInsertCalloutBox: () => void;
+  onInsertFootnote: () => void;
+  onInsertSymbol: (symbol: string) => void;
+  onInsertQuickBlock: (key: QuickBlockKey) => void;
+  onInsertBlankPage: () => void;
+  onCleanSpacingAndBreaks: () => void;
+  onOpenOutline: () => void;
+  readingMode: boolean;
+  setReadingMode: (val: boolean) => void;
+  showTabsBar: boolean;
+  setShowTabsBar: (val: boolean) => void;
+  activePageIndex: number;
 
   // Insert Actions
   onInsertTable: (rows: number, cols: number) => void;
@@ -192,15 +233,15 @@ export interface BottomSheetsProps {
   pageNumberFormat: PageNumberFormat;
   setPageNumberFormat: (f: PageNumberFormat) => void;
 
-  // Templates, Find & Replace, Export
+  // Templates, Find & Replace, Export (with Page Range PDF support)
   onApplyTemplate: (templateKey: 'a5-notice' | 'a4-letterhead' | 'a4-exam') => void;
   onInsertBookFrontMatter: (key: BookFrontMatterKey) => void;
   onOpenFindReplace: () => void;
-  onPrintVectorPdf: () => void;
+  onPrintVectorPdf: (rangeMode?: PdfPageRangeMode, customRange?: string) => void;
   onPrintBookletImposition: () => void;
   onExportBookletHtml: () => void;
   onExportWordDocx: (preferShare: boolean) => void;
-  onExportStandaloneHtml: () => void;
+  onExportStandaloneHtml: (rangeMode?: PdfPageRangeMode, customRange?: string) => void;
   onSaveMpsDraft: () => void;
   onTriggerOpenMpsDraft: () => void;
 }
@@ -220,6 +261,13 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
   pageCount,
   zoomMode,
   setZoomMode,
+  printLayout,
+  onTogglePrintLayout,
+  onSelectAllDocument,
+  isAllDocSelected,
+  onCopyAllDocument,
+  onClearAllDocument,
+  onClearSelectionState,
   activeFont,
   onSelectFont,
   fontSizePt,
@@ -244,8 +292,26 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
   onTableAction,
   activeImageEl,
   onImageResize,
-  onImageAlign,
+  onImageWrapChange,
+  onImageBorderChange,
+  onImageCaptionChange,
   onDeleteActiveImage,
+  onClearActiveImage,
+  isFormatPainterActive,
+  onToggleFormatPainter,
+  onToggleDropCap,
+  onInsertCalloutBox,
+  onInsertFootnote,
+  onInsertSymbol,
+  onInsertQuickBlock,
+  onInsertBlankPage,
+  onCleanSpacingAndBreaks,
+  onOpenOutline,
+  readingMode,
+  setReadingMode,
+  showTabsBar,
+  setShowTabsBar,
+  activePageIndex,
   onInsertTable,
   onTriggerImageUpload,
   onInsertDivider,
@@ -327,6 +393,8 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
   const [showFontSubList, setShowFontSubList] = useState(false);
   const [tableRowsInput, setTableRowsInput] = useState(3);
   const [tableColsInput, setTableColsInput] = useState(3);
+  const [pdfRangeMode, setPdfRangeMode] = useState<PdfPageRangeMode>('all');
+  const [pdfCustomRange, setPdfCustomRange] = useState<string>('1-4');
 
   const preventFocusLoss = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
@@ -334,7 +402,45 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
 
   return (
     <>
-      {(activeTableCell || activeImageEl) && activeDrawer === 'none' && (
+      {/* ADVANCED WPS-STYLE IMAGE CONTROLS TOOLBAR */}
+      {activeImageEl && activeDrawer === 'none' && !readingMode && (
+        <ImageToolbar
+          activeImageEl={activeImageEl}
+          darkMode={darkMode}
+          onWidthChange={onImageResize}
+          onWrapChange={onImageWrapChange}
+          onBorderChange={onImageBorderChange}
+          onCaptionChange={onImageCaptionChange}
+          onDelete={onDeleteActiveImage}
+          onClose={onClearActiveImage}
+        />
+      )}
+
+      {/* FORMAT PAINTER ARMED BANNER */}
+      {isFormatPainterActive && activeDrawer === 'none' && !readingMode && (
+        <div
+          className={`no-print fixed right-2 bottom-14 left-2 z-30 mx-auto flex max-w-md items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs shadow-lg ${
+            darkMode
+              ? 'border-blue-700 bg-[#1B2538] text-blue-100'
+              : 'border-blue-300 bg-[#E8F0FE] text-blue-950'
+          }`}
+        >
+          <span className="flex items-center gap-1.5 font-semibold">
+            <Paintbrush className="h-3.5 w-3.5 text-[#1A73E8]" />
+            <span>Format Painter active — tap or select target text</span>
+          </span>
+          <button
+            type="button"
+            onMouseDown={preventFocusLoss}
+            onClick={onToggleFormatPainter}
+            className="rounded-lg bg-white/80 px-2 py-0.5 text-[11px] font-bold text-[#1A73E8] dark:bg-gray-800 dark:text-blue-300"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {activeTableCell && !activeImageEl && activeDrawer === 'none' && !readingMode && (
         <div
           className={`no-print fixed right-2 bottom-14 left-2 z-30 mx-auto flex max-w-xl items-center justify-between gap-1.5 overflow-x-auto rounded-xl border px-3 py-2 shadow-lg ${
             darkMode
@@ -383,55 +489,6 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
                 onClick={() => onTableAction('del-table')}
                 className="rounded-lg bg-red-50 px-2.5 py-1.5 text-red-600 hover:bg-red-100 dark:bg-red-900/40 dark:text-red-300"
                 title="Delete Table"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
-
-          {activeImageEl && (
-            <div className="flex w-full items-center justify-between gap-1.5 text-xs font-medium">
-              <span className="shrink-0 font-semibold text-[#1A73E8]">Image:</span>
-              {[25, 50, 75, 100].map((pct) => (
-                <button
-                  key={pct}
-                  type="button"
-                  onMouseDown={preventFocusLoss}
-                  onClick={() => onImageResize(pct)}
-                  className="rounded-lg bg-gray-100 px-2 py-1 text-gray-700 hover:bg-blue-50 hover:text-blue-700 dark:bg-gray-700 dark:text-gray-200"
-                >
-                  {pct}%
-                </button>
-              ))}
-              <button
-                type="button"
-                onMouseDown={preventFocusLoss}
-                onClick={() => onImageAlign('left')}
-                className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-700"
-              >
-                <AlignLeft className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onMouseDown={preventFocusLoss}
-                onClick={() => onImageAlign('center')}
-                className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-700"
-              >
-                <AlignCenter className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onMouseDown={preventFocusLoss}
-                onClick={() => onImageAlign('right')}
-                className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-700"
-              >
-                <AlignRight className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onMouseDown={preventFocusLoss}
-                onClick={onDeleteActiveImage}
-                className="rounded bg-red-50 p-1 text-red-600 hover:bg-red-100"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -524,8 +581,60 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
         </div>
       )}
 
+      {/* DOCUMENT-WIDE MULTI-PAGE SELECTION ACTION BAR */}
+      {isAllDocSelected && printLayout && activeDrawer === 'none' && (
+        <div
+          className={`no-print fixed right-2 bottom-14 left-2 z-30 mx-auto flex max-w-md items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs shadow-lg ${
+            darkMode
+              ? 'border-blue-700/70 bg-[#1B2538] text-blue-100'
+              : 'border-blue-300 bg-[#E8F0FE] text-blue-950'
+          }`}
+        >
+          <span className="flex items-center gap-1.5 font-semibold">
+            <CheckSquare className="h-4 w-4 text-[#1A73E8]" />
+            <span>
+              All {pageCount} {pageCount === 1 ? 'page' : 'pages'} selected
+            </span>
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onMouseDown={preventFocusLoss}
+              onClick={onCopyAllDocument}
+              className="flex items-center gap-1 rounded-lg bg-[#1A73E8] px-2.5 py-1 text-[11px] font-bold text-white shadow-xs"
+            >
+              <Copy className="h-3 w-3" />
+              Copy
+            </button>
+            <button
+              type="button"
+              onMouseDown={preventFocusLoss}
+              onClick={onClearAllDocument}
+              className="flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-xs"
+            >
+              <Trash2 className="h-3 w-3" />
+              Delete
+            </button>
+            <button
+              type="button"
+              onMouseDown={preventFocusLoss}
+              onClick={onClearSelectionState}
+              className="rounded-lg p-1 hover:bg-black/10"
+              title="Dismiss selection"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* PRESS SIGNATURE (MULTIPLE OF 4) BOOK BINDING STATUS BAR */}
-      {mirrorMargins && activeDrawer === 'none' && !activeTableCell && !activeImageEl && (
+      {mirrorMargins &&
+        printLayout &&
+        activeDrawer === 'none' &&
+        !activeTableCell &&
+        !activeImageEl &&
+        !isAllDocSelected && (
         <div
           className={`no-print fixed right-0 bottom-12 left-0 z-20 flex h-7 items-center justify-center gap-2 border-t px-3 text-[11px] font-medium ${
             darkMode
@@ -550,7 +659,8 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
         </div>
       )}
 
-      {/* SLIM GOOGLE DOCS-STYLE BOTTOM FORMATTING BAR */}
+      {/* SLIM GOOGLE DOCS-STYLE BOTTOM FORMATTING BAR (hidden in Reading / Proofread Mode) */}
+      {!readingMode && (
       <div
         className={`no-print fixed right-0 bottom-0 left-0 z-30 flex h-12 items-center justify-between border-t px-2 sm:justify-center sm:gap-2 ${
           darkMode
@@ -656,24 +766,54 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
           >
             <List className="h-4 w-4" />
           </button>
-        </div>
 
-        <div className="flex items-center gap-1">
           <button
             type="button"
             onMouseDown={preventFocusLoss}
-            onClick={() => setZoomMode(zoomMode === 'fit' ? '100' : 'fit')}
-            className={`rounded-lg border px-2 py-1 text-[11px] font-semibold ${
-              zoomMode === '100'
-                ? 'border-blue-500 bg-blue-50 text-[#1A73E8] dark:bg-blue-950/60 dark:text-blue-300'
-                : darkMode
-                  ? 'border-gray-700 bg-gray-800 text-gray-300'
-                  : 'border-gray-200 bg-gray-50 text-gray-700'
+            onClick={onToggleFormatPainter}
+            className={`rounded-lg p-2 transition-colors ${
+              isFormatPainterActive
+                ? 'bg-[#1A73E8] text-white'
+                : 'hover:bg-gray-100 dark:hover:bg-gray-800'
             }`}
-            title="Toggle Zoom Fit / 100%"
+            title="Format Painter (ഫോർമാറ്റ് പെയന്റർ)"
           >
-            {zoomMode === 'fit' ? 'Fit' : '100%'}
+            <Paintbrush className="h-4 w-4" />
           </button>
+
+          <button
+            type="button"
+            onMouseDown={preventFocusLoss}
+            onClick={onSelectAllDocument}
+            className={`rounded-lg p-2 transition-colors ${
+              isAllDocSelected
+                ? 'bg-[#E8F0FE] text-[#1A73E8] dark:bg-blue-950/60 dark:text-blue-300'
+                : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+            }`}
+            title="Select All (എല്ലാം തിരഞ്ഞെടുക്കുക)"
+          >
+            <CheckSquare className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1">
+          {printLayout && (
+            <button
+              type="button"
+              onMouseDown={preventFocusLoss}
+              onClick={() => setZoomMode(zoomMode === 'fit' ? '100' : 'fit')}
+              className={`rounded-lg border px-2 py-1 text-[11px] font-semibold ${
+                zoomMode === '100'
+                  ? 'border-blue-500 bg-blue-50 text-[#1A73E8] dark:bg-blue-950/60 dark:text-blue-300'
+                  : darkMode
+                    ? 'border-gray-700 bg-gray-800 text-gray-300'
+                    : 'border-gray-200 bg-gray-50 text-gray-700'
+              }`}
+              title="Toggle Zoom Fit / 100%"
+            >
+              {zoomMode === 'fit' ? 'Fit' : '100%'}
+            </button>
+          )}
 
           <button
             type="button"
@@ -693,8 +833,12 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
           </button>
         </div>
       </div>
+      )}
 
-      {activeDrawer !== 'none' && (
+      {(activeDrawer === 'format' ||
+        activeDrawer === 'insert' ||
+        activeDrawer === 'more' ||
+        activeDrawer === 'share-export') && (
         <div
           onClick={() => {
             setActiveDrawer('none');
@@ -1176,6 +1320,38 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
                   <Sparkles className="h-4 w-4" />
                   Apply Book Typography (Tiro · 10.5pt · 1.6 · Justify · 6mm Indent)
                 </button>
+
+                {/* BOOK DROP CAP & WPS SPACING CLEANER */}
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onMouseDown={preventFocusLoss}
+                    onClick={() => {
+                      onToggleDropCap();
+                      setActiveDrawer('none');
+                    }}
+                    className="flex flex-col items-start rounded-xl border border-gray-200 p-2.5 text-left text-xs font-semibold hover:bg-blue-50/60 dark:border-gray-700 dark:hover:bg-gray-800"
+                  >
+                    <span className="font-bold text-[#1A73E8]">Book Drop Cap (അ)</span>
+                    <span className="mt-0.5 text-[10px] font-normal text-gray-500">
+                      Enlarge opening Malayalam letter
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={preventFocusLoss}
+                    onClick={() => {
+                      onCleanSpacingAndBreaks();
+                      setActiveDrawer('none');
+                    }}
+                    className="flex flex-col items-start rounded-xl border border-gray-200 p-2.5 text-left text-xs font-semibold hover:bg-blue-50/60 dark:border-gray-700 dark:hover:bg-gray-800"
+                  >
+                    <span className="font-bold text-[#1A73E8]">Clean Spaces / Breaks</span>
+                    <span className="mt-0.5 text-[10px] font-normal text-gray-500">
+                      Fix WhatsApp &amp; PDF paste wraps
+                    </span>
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -1251,7 +1427,7 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               <button
                 type="button"
                 onClick={() => {
@@ -1261,7 +1437,7 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
                 className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50/70 p-3 text-xs font-bold text-indigo-800 hover:bg-indigo-100/70 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300"
               >
                 <BookmarkPlus className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-                <span className="text-center">Insert Chapter Start</span>
+                <span className="text-center">Chapter Start</span>
               </button>
 
               <button
@@ -1279,13 +1455,37 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  onInsertDivider();
+                  onInsertCalloutBox();
                   setActiveDrawer('none');
                 }}
                 className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-gray-200 p-3 text-xs font-semibold hover:bg-blue-50/50 dark:border-gray-700 dark:hover:bg-gray-800"
               >
-                <Minus className="h-5 w-5 text-[#1A73E8]" />
-                <span>Divider Line</span>
+                <MessageSquarePlus className="h-5 w-5 text-[#1A73E8]" />
+                <span>Callout / Notice Box</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onInsertFootnote();
+                  setActiveDrawer('none');
+                }}
+                className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-gray-200 p-3 text-xs font-semibold hover:bg-blue-50/50 dark:border-gray-700 dark:hover:bg-gray-800"
+              >
+                <Superscript className="h-5 w-5 text-[#1A73E8]" />
+                <span>Footnote (അടിക്കുറിപ്പ്)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onInsertBlankPage();
+                  setActiveDrawer('none');
+                }}
+                className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-gray-200 p-3 text-xs font-semibold hover:bg-blue-50/50 dark:border-gray-700 dark:hover:bg-gray-800"
+              >
+                <FilePlus className="h-5 w-5 text-[#1A73E8]" />
+                <span>Insert Blank Page</span>
               </button>
 
               <button
@@ -1299,6 +1499,96 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
                 <Scissors className="h-5 w-5 text-[#1A73E8]" />
                 <span>Page Break</span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onInsertDivider();
+                  setActiveDrawer('none');
+                }}
+                className="col-span-2 flex items-center justify-center gap-2 rounded-xl border border-gray-200 py-2.5 text-xs font-semibold hover:bg-blue-50/50 sm:col-span-3 dark:border-gray-700 dark:hover:bg-gray-800"
+              >
+                <Minus className="h-4 w-4 text-[#1A73E8]" />
+                <span>Horizontal Divider Line (വിഭജന വര)</span>
+              </button>
+            </div>
+
+            {/* QUICK MALAYALAM PRINT SNIPPETS ("QUICK BLOCKS") */}
+            <div className="space-y-2 rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+              <div className="text-xs font-bold">
+                Quick Blocks (മലയാളം പ്രിന്റ് ബ്ലോക്കുകൾ)
+              </div>
+              <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onInsertQuickBlock('signature-block');
+                    setActiveDrawer('none');
+                  }}
+                  className="rounded-xl border border-gray-200 bg-gray-50/80 px-3 py-2 text-left text-xs font-semibold hover:border-[#1A73E8] hover:bg-blue-50/50 dark:border-gray-700 dark:bg-gray-800/70"
+                >
+                  <div className="font-bold text-gray-900 dark:text-white">
+                    സ്ഥലം / തീയതി / ഒപ്പ്
+                  </div>
+                  <div className="text-[10px] text-gray-500">
+                    Place, Date &amp; Signature
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onInsertQuickBlock('agenda-header');
+                    setActiveDrawer('none');
+                  }}
+                  className="rounded-xl border border-gray-200 bg-gray-50/80 px-3 py-2 text-left text-xs font-semibold hover:border-[#1A73E8] hover:bg-blue-50/50 dark:border-gray-700 dark:bg-gray-800/70"
+                >
+                  <div className="font-bold text-gray-900 dark:text-white">
+                    കാര്യപരിപാടികൾ
+                  </div>
+                  <div className="text-[10px] text-gray-500">
+                    Event Agenda Header Box
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onInsertQuickBlock('chapter-ornament');
+                    setActiveDrawer('none');
+                  }}
+                  className="rounded-xl border border-gray-200 bg-gray-50/80 px-3 py-2 text-left text-xs font-semibold hover:border-[#1A73E8] hover:bg-blue-50/50 dark:border-gray-700 dark:bg-gray-800/70"
+                >
+                  <div className="font-bold text-gray-900 dark:text-white">
+                    ❖ ❖ ❖
+                  </div>
+                  <div className="text-[10px] text-gray-500">
+                    Book Chapter End Ornament
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* SPECIAL SYMBOLS PICKER PALETTE */}
+            <div className="space-y-2 rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+              <div className="text-xs font-bold">
+                Special Symbols (പ്രത്യേക ചിഹ്നങ്ങൾ)
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {SPECIAL_SYMBOLS_PALETTE.map((sym) => (
+                  <button
+                    key={sym.char}
+                    type="button"
+                    onMouseDown={preventFocusLoss}
+                    onClick={() => {
+                      onInsertSymbol(sym.char);
+                      setActiveDrawer('none');
+                    }}
+                    title={sym.label}
+                    className="flex h-9 min-w-[38px] items-center justify-center rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-sm font-semibold text-gray-800 transition hover:border-[#1A73E8] hover:bg-blue-50 hover:text-[#1A73E8] dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                  >
+                    {sym.char}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="space-y-2 rounded-xl border border-gray-200 p-3 dark:border-gray-700">
@@ -1496,12 +1786,57 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
                     Best for print shops ({paperSize} font-locked vector PDF with
                     closed page borders)
                   </p>
+
+                  {/* WPS PAGE RANGE SELECTOR (All / Current / Custom Range) */}
+                  <div className="mt-2.5 space-y-2 rounded-xl border border-blue-200/80 bg-white/80 p-2.5 dark:border-blue-900/60 dark:bg-gray-900/50">
+                    <div className="text-[11px] font-bold text-gray-700 dark:text-gray-200">
+                      Page Range (പ്രിന്റ് ചെയ്യേണ്ട പേജുകൾ)
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 text-[11px] font-semibold">
+                      {(
+                        [
+                          { key: 'all', label: 'All Pages' },
+                          {
+                            key: 'current',
+                            label: `Current (P.${activePageIndex + 1})`,
+                          },
+                          { key: 'custom', label: 'Custom Range' },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onClick={() => setPdfRangeMode(opt.key)}
+                          className={`rounded-lg border px-2 py-1.5 text-center transition ${
+                            pdfRangeMode === opt.key
+                              ? 'border-[#1A73E8] bg-[#E8F0FE] text-[#1A73E8] dark:bg-blue-950/70 dark:text-blue-300'
+                              : 'border-gray-200 bg-white text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    {pdfRangeMode === 'custom' && (
+                      <input
+                        type="text"
+                        value={pdfCustomRange}
+                        onChange={(e) => setPdfCustomRange(e.target.value)}
+                        placeholder="e.g., 1-4 or 1, 3, 5-8"
+                        className="w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs focus:border-[#1A73E8] focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                      />
+                    )}
+                  </div>
+
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
                       type="button"
                       onClick={() => {
                         setActiveDrawer('none');
-                        setTimeout(() => onPrintVectorPdf(), 120);
+                        setTimeout(
+                          () => onPrintVectorPdf(pdfRangeMode, pdfCustomRange),
+                          120
+                        );
                       }}
                       className="flex items-center gap-1.5 rounded-xl bg-[#1A73E8] px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-blue-700"
                     >
@@ -1511,7 +1846,7 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        onExportStandaloneHtml();
+                        onExportStandaloneHtml(pdfRangeMode, pdfCustomRange);
                         setActiveDrawer('none');
                       }}
                       className="flex items-center gap-1.5 rounded-xl border border-blue-300 bg-white px-3 py-2 text-xs font-semibold text-[#1A73E8] hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-800 dark:text-blue-300"
@@ -1678,6 +2013,52 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
 
           {moreSubPanel === 'main' && (
             <div className="space-y-3 pb-4">
+              {/* PROMINENT GOOGLE DOCS-STYLE PRINT LAYOUT ON/OFF SWITCH */}
+              <div
+                className={`flex items-center justify-between gap-3 rounded-2xl border p-3.5 ${
+                  printLayout
+                    ? 'border-[#1A73E8]/50 bg-[#E8F0FE]/60 dark:border-blue-700/60 dark:bg-blue-950/35'
+                    : 'border-gray-200 bg-gray-50/90 dark:border-gray-700 dark:bg-gray-800/70'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                      printLayout
+                        ? 'bg-[#1A73E8] text-white'
+                        : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
+                    }`}
+                  >
+                    <FileText className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold">
+                      Print Layout (പ്രിന്റ് പേജ് വ്യൂ)
+                    </div>
+                    <div className="mt-0.5 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+                      {printLayout
+                        ? `ON — Split ${paperSize} pages with borders, headers & footers`
+                        : 'OFF — Pageless continuous mode for fast, smooth typing'}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={printLayout}
+                  onClick={() => onTogglePrintLayout(!printLayout)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                    printLayout ? 'bg-[#1A73E8]' : 'bg-gray-300 dark:bg-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-xs transition-transform ${
+                      printLayout ? 'translate-x-5.5' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+
               <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
                 <label className="mb-1 block text-[11px] font-semibold text-gray-500">
                   Document Title (ഡോക്യുമെന്റിന്റെ പേര്)
@@ -1692,8 +2073,12 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
 
               <div className="grid grid-cols-3 gap-2 rounded-xl bg-gray-100 p-2.5 text-center text-xs dark:bg-gray-800">
                 <div>
-                  <div className="font-bold text-[#1A73E8]">{pageCount}</div>
-                  <div className="text-[11px] text-gray-500">Pages (പേജുകൾ)</div>
+                  <div className="font-bold text-[#1A73E8]">
+                    {printLayout ? pageCount : '∞'}
+                  </div>
+                  <div className="text-[11px] text-gray-500">
+                    {printLayout ? 'Pages (പേജുകൾ)' : 'Pageless'}
+                  </div>
                 </div>
                 <div>
                   <div className="font-bold text-[#1A73E8]">{metrics.words}</div>
@@ -1705,7 +2090,121 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
                 </div>
               </div>
 
+              {/* EYE-PROTECTION PROOFREADING / READING MODE TOGGLE */}
+              <div
+                className={`flex items-center justify-between gap-3 rounded-2xl border p-3.5 ${
+                  readingMode
+                    ? 'border-amber-400/70 bg-amber-50/80 dark:border-amber-700/60 dark:bg-amber-950/35'
+                    : 'border-gray-200 bg-gray-50/90 dark:border-gray-700 dark:bg-gray-800/70'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                      readingMode
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
+                    }`}
+                  >
+                    <Eye className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold">
+                      Reading / Proofread Mode (വായന &amp; പ്രൂഫ് റീഡിംഗ്)
+                    </div>
+                    <div className="mt-0.5 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+                      Warm Sepia paper tint + full-screen distraction-free book proofreading
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={readingMode}
+                  onClick={() => {
+                    const next = !readingMode;
+                    setReadingMode(next);
+                    if (next) setActiveDrawer('none');
+                  }}
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                    readingMode ? 'bg-amber-600' : 'bg-gray-300 dark:bg-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-xs transition-transform ${
+                      readingMode ? 'translate-x-5.5' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+
               <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveDrawer('none');
+                    onOpenOutline();
+                  }}
+                  className="flex w-full items-center justify-between rounded-xl border border-gray-200 p-3 text-left hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
+                >
+                  <div className="flex items-center gap-3">
+                    <ListTree className="h-5 w-5 text-[#1A73E8]" />
+                    <div>
+                      <div className="text-xs font-bold">
+                        Document Outline (ഉള്ളടക്കം / Headings)
+                      </div>
+                      <div className="text-[11px] text-gray-500">
+                        Jump instantly to any H1, H2, or H3 chapter heading
+                      </div>
+                    </div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-gray-400" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    onCleanSpacingAndBreaks();
+                    setActiveDrawer('none');
+                  }}
+                  className="flex w-full items-center justify-between rounded-xl border border-gray-200 p-3 text-left hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
+                >
+                  <div className="flex items-center gap-3">
+                    <Eraser className="h-5 w-5 text-[#1A73E8]" />
+                    <div>
+                      <div className="text-xs font-bold">
+                        Clean Spaces / Fix Line Breaks (WPS Paste Cleaner)
+                      </div>
+                      <div className="text-[11px] text-gray-500">
+                        Remove double spaces &amp; broken WhatsApp/PDF line wraps cleanly
+                      </div>
+                    </div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-gray-400" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveDrawer('none');
+                    window.setTimeout(() => onSelectAllDocument(), 60);
+                  }}
+                  className="flex w-full items-center justify-between rounded-xl border border-gray-200 p-3 text-left hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
+                >
+                  <div className="flex items-center gap-3">
+                    <CheckSquare className="h-5 w-5 text-[#1A73E8]" />
+                    <div>
+                      <div className="text-xs font-bold">
+                        Select All (എല്ലാം തിരഞ്ഞെടുക്കുക)
+                      </div>
+                      <div className="text-[11px] text-gray-500">
+                        Select entire document across all pages for Copy, Format or Delete
+                      </div>
+                    </div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-gray-400" />
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setMoreSubPanel('page-setup')}
@@ -1738,7 +2237,7 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
                         Malayalam Print Templates (മാതൃകകൾ)
                       </div>
                       <div className="text-[11px] text-gray-500">
-                        A5 Notice, A4 Official Letterhead, 2-Column Exam Paper
+                        A5 Notice, A4 Official Letterhead, 2-Column Exam Paper, Book Front Matter
                       </div>
                     </div>
                   </div>
@@ -1768,32 +2267,43 @@ export const BottomSheets: React.FC<BottomSheetsProps> = ({
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
                   onClick={() => setDarkMode(!darkMode)}
-                  className="flex items-center justify-center gap-2 rounded-xl border border-gray-200 py-2.5 text-xs font-semibold dark:border-gray-700"
+                  className="flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 py-2.5 text-[11px] font-semibold dark:border-gray-700"
                 >
                   {darkMode ? (
                     <>
-                      <Sun className="h-4 w-4 text-amber-400" /> Light Workspace
+                      <Sun className="h-3.5 w-3.5 text-amber-400" /> Light
                     </>
                   ) : (
                     <>
-                      <Moon className="h-4 w-4 text-gray-600" /> Dark Workspace
+                      <Moon className="h-3.5 w-3.5 text-gray-600" /> Dark
                     </>
                   )}
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowRuler(!showRuler)}
-                  className={`flex items-center justify-center gap-2 rounded-xl border py-2.5 text-xs font-semibold ${
+                  className={`flex items-center justify-center gap-1 rounded-xl border py-2.5 text-[11px] font-semibold ${
                     showRuler
                       ? 'border-[#1A73E8] bg-blue-50 text-[#1A73E8] dark:bg-blue-950/50 dark:text-blue-300'
                       : 'border-gray-200 dark:border-gray-700'
                   }`}
                 >
-                  Millimeter Ruler: {showRuler ? 'ON' : 'OFF'}
+                  Ruler: {showRuler ? 'ON' : 'OFF'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowTabsBar(!showTabsBar)}
+                  className={`flex items-center justify-center gap-1 rounded-xl border py-2.5 text-[11px] font-semibold ${
+                    showTabsBar
+                      ? 'border-[#1A73E8] bg-blue-50 text-[#1A73E8] dark:bg-blue-950/50 dark:text-blue-300'
+                      : 'border-gray-200 dark:border-gray-700'
+                  }`}
+                >
+                  Tabs: {showTabsBar ? 'ON' : 'OFF'}
                 </button>
               </div>
 

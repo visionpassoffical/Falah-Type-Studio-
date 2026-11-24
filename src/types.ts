@@ -18,6 +18,13 @@ export type PageNumberAlign = 'left' | 'center' | 'right' | 'outer';
 export type PageNumberFormat = 'malayalam_x_of_y' | 'numeric_only' | 'english_x_of_y';
 export type BookFrontMatterKey = 'title-page' | 'copyright-page' | 'toc-page';
 
+export type ProjectStatus = 'pending' | 'completed';
+export type ProjectFilterTab = 'all' | 'pending' | 'completed';
+export type PdfPageRangeMode = 'all' | 'current' | 'custom';
+export type ImageWrapMode = 'inline' | 'center' | 'float-left' | 'float-right';
+export type ImageBorderMode = 'none' | 'thin' | 'frame';
+export type QuickBlockKey = 'signature-block' | 'agenda-header' | 'chapter-ornament';
+
 export type MalayalamFontCategory =
   | 'Clean Sans-Serif (നോട്ടീസ് / ഓഫീസ്)'
   | 'Book & Literary Serif (പുസ്തകം / സാഹിത്യം)'
@@ -91,9 +98,46 @@ export interface SavedProjectState {
   evenHeaderText?: string;
   oddHeaderText?: string;
   hideHeaderOnChapterPages?: boolean;
+  // Pageless vs Print Layout view preference
+  printLayout?: boolean;
 }
 
-export type ActiveDrawer = 'none' | 'format' | 'insert' | 'more' | 'share-export';
+export interface ProjectRecord {
+  id: string;
+  status: ProjectStatus;
+  createdAt: number;
+  updatedAt: number;
+  wordCount: number;
+  pageCount: number;
+  cursorOffset?: number;
+  state: SavedProjectState;
+}
+
+export interface OutlineHeadingItem {
+  id: string;
+  level: 1 | 2 | 3;
+  text: string;
+  pageIndex: number;
+}
+
+export interface CopiedTextFormat {
+  fontFamily: string;
+  fontSize: string;
+  color: string;
+  backgroundColor: string;
+  fontWeight: string;
+  fontStyle: string;
+  textDecoration: string;
+}
+
+export type ActiveDrawer =
+  | 'none'
+  | 'format'
+  | 'insert'
+  | 'more'
+  | 'share-export'
+  | 'projects'
+  | 'outline';
 export type FormatTab = 'text' | 'paragraph';
 export type MoreSubPanel = 'main' | 'page-setup' | 'templates';
 

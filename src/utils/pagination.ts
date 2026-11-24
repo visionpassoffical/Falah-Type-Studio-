@@ -69,8 +69,10 @@ export function calculateUsablePageHeightPx(
     (config.showHeaderFooter ||
       (config.showPageNumbers && config.pageNumberPosition === 'bottom'));
 
-  const headerHeightPx = hasTopBar ? 28 : 0;
-  const footerHeightPx = hasBottomBar ? 28 : 0;
+  // Strict fixed header/footer bar height (24px bar + 6px spacing = 30px)
+  // so 1-digit (9) -> 2-digit (10) page numbers NEVER alter usable height
+  const headerHeightPx = hasTopBar ? 30 : 0;
+  const footerHeightPx = hasBottomBar ? 30 : 0;
   const borderPaddingPx = config.hasPageBorder
     ? config.pageBorderPaddingMm * 2 * MM_TO_PX
     : 0;
@@ -377,24 +379,57 @@ export function runZeroCutoffPaginationPass(
     const pageEl = pageEls[i];
     if (!pageEl) continue;
 
-    // If a .mps-chapter-start appears after earlier content on the same page, push it + following siblings to Page i+1
+    // If a .mps-chapter-start, .mps-page-break, or .mps-blank-page-marker appears on this page,
+    // handle explicit page boundaries cleanly
     const directChildren = Array.from(pageEl.children) as HTMLElement[];
-    const laterChapterIdx = directChildren.findIndex(
+    const explicitBreakIdx = directChildren.findIndex(
       (child, idx) =>
-        idx > 0 &&
-        (child.classList.contains('mps-chapter-start') ||
-          child.getAttribute('data-chapter-start') === 'true')
+        (idx > 0 &&
+          (child.classList.contains('mps-chapter-start') ||
+            child.getAttribute('data-chapter-start') === 'true')) ||
+        child.classList.contains('mps-page-break') ||
+        child.classList.contains('mps-blank-page-marker')
     );
-    if (laterChapterIdx > 0) {
+    if (explicitBreakIdx >= 0) {
+      const breakEl = directChildren[explicitBreakIdx];
+      const isManualBreak = breakEl.classList.contains('mps-page-break');
+      const isBlankPageBreak = breakEl.classList.contains('mps-blank-page-marker');
+      const startMoveIdx =
+        isManualBreak || isBlankPageBreak ? explicitBreakIdx + 1 : explicitBreakIdx;
+      const toMove = directChildren.slice(startMoveIdx);
       const nextPageEl = pageEls[i + 1];
-      if (!nextPageEl) {
-        neededPageCount = Math.max(neededPageCount, i + 2);
-      } else {
-        const toMove = directChildren.slice(laterChapterIdx);
-        for (let m = toMove.length - 1; m >= 0; m--) {
-          nextPageEl.insertBefore(toMove[m], nextPageEl.firstChild);
+
+      if (isBlankPageBreak) {
+        // Reserve nextPageEl as an intentional blank page and move subsequent content to i+2
+        const afterBlankEl = pageEls[i + 2];
+        if (!nextPageEl || (toMove.length > 0 && !afterBlankEl)) {
+          neededPageCount = Math.max(neededPageCount, toMove.length > 0 ? i + 3 : i + 2);
+        } else {
+          breakEl.remove();
+          nextPageEl.innerHTML =
+            '<div class="mps-blank-page-keeper" data-blank-page="true" contenteditable="false"></div>';
+          if (toMove.length > 0 && afterBlankEl) {
+            for (let m = toMove.length - 1; m >= 0; m--) {
+              afterBlankEl.insertBefore(toMove[m], afterBlankEl.firstChild);
+            }
+          }
+          didMutateDom = true;
         }
-        didMutateDom = true;
+      } else {
+        if (isManualBreak) {
+          breakEl.remove();
+          didMutateDom = true;
+        }
+        if (toMove.length > 0) {
+          if (!nextPageEl) {
+            neededPageCount = Math.max(neededPageCount, i + 2);
+          } else {
+            for (let m = toMove.length - 1; m >= 0; m--) {
+              nextPageEl.insertBefore(toMove[m], nextPageEl.firstChild);
+            }
+            didMutateDom = true;
+          }
+        }
       }
     }
 
@@ -466,18 +501,27 @@ export function runZeroCutoffPaginationPass(
         firstOfNext.classList.contains('mps-chapter-start') ||
         firstOfNext.getAttribute('data-chapter-start') === 'true';
 
+      const isExplicitBlank =
+        Boolean(pageEl.querySelector('[data-blank-page="true"]')) ||
+        Boolean(nextPageEl.querySelector('[data-blank-page="true"]'));
+
       if (
         isNextChapterStart ||
+        isExplicitBlank ||
         (lastOfCurrent &&
           (lastOfCurrent.classList.contains('mps-page-break') ||
-            firstOfNext.classList.contains('mps-page-break')))
+            firstOfNext.classList.contains('mps-page-break') ||
+            firstOfNext.classList.contains('mps-blank-page-marker')))
       ) {
         break;
       }
 
       pageEl.appendChild(firstOfNext);
 
-      if (!doesPageContentOverflow(pageEl, usableHeightPx)) {
+      // Hysteresis buffer (8px): only pull a block back up from Page i+1 if it fits
+      // comfortably with at least 8px spare clearance, preventing 9 -> 10 -> 9 -> 10 ping-ponging
+      const pullUpThresholdPx = Math.max(100, usableHeightPx - 8);
+      if (!doesPageContentOverflow(pageEl, pullUpThresholdPx)) {
         if (
           firstOfNext.getAttribute('data-split-continuation') === 'true' &&
           lastOfCurrent &&
@@ -492,7 +536,11 @@ export function runZeroCutoffPaginationPass(
         }
         didMutateDom = true;
       } else {
-        const remainder = splitBlockAtExactWordBoundary(pageEl, firstOfNext, usableHeightPx);
+        const remainder = splitBlockAtExactWordBoundary(
+          pageEl,
+          firstOfNext,
+          pullUpThresholdPx
+        );
         if (remainder) {
           firstOfNext.removeAttribute('data-split-continuation');
           nextPageEl.insertBefore(remainder, nextPageEl.firstChild);
@@ -509,7 +557,9 @@ export function runZeroCutoffPaginationPass(
     const lastEl = pageEls[neededPageCount - 1];
     if (!lastEl) break;
     const text = (lastEl.innerText || '').trim();
-    const hasMedia = Boolean(lastEl.querySelector('img, table, hr, svg'));
+    const hasMedia = Boolean(
+      lastEl.querySelector('img, table, hr, svg, [data-blank-page="true"]')
+    );
     if (text.length === 0 && !hasMedia) {
       neededPageCount--;
     } else {
@@ -522,4 +572,155 @@ export function runZeroCutoffPaginationPass(
   }
 
   return { neededPageCount, didMutateDom };
+}
+
+export interface OffscreenPaginationStyleOptions {
+  activeFontCssFamily: string;
+  lineSpacing: string;
+  letterSpacing: string;
+  firstLineIndent: boolean;
+  paragraphGapPt: number;
+  columnCount: 1 | 2 | 3;
+  mirrorMargins: boolean;
+  innerMarginMm: number;
+  outerMarginMm: number;
+}
+
+/**
+ * Splits a continuous HTML string (from Pageless Mode) into exact A5/A4/Demy paginated
+ * HTML page strings offscreen so PDF / Standalone HTML / Booklet exports ALWAYS use
+ * the selected physical paper size regardless of whether Print Layout view is ON or OFF.
+ */
+export function paginateHtmlOffscreen(
+  combinedHtml: string,
+  config: PaginationConfig,
+  styleOptions: OffscreenPaginationStyleOptions
+): string[] {
+  if (typeof document === 'undefined') {
+    return [combinedHtml];
+  }
+
+  const rawW =
+    config.paperSize === 'Custom'
+      ? config.customWidthMm
+      : PAPER_SIZES[config.paperSize].widthMm;
+  const rawH =
+    config.paperSize === 'Custom'
+      ? config.customHeightMm
+      : PAPER_SIZES[config.paperSize].heightMm;
+  const finalWidthMm = config.orientation === 'portrait' ? rawW : rawH;
+  const activeMargins =
+    config.marginPreset === 'custom'
+      ? config.customMargins
+      : MARGIN_PRESETS[config.marginPreset].margins;
+
+  const horizontalMarginMm = styleOptions.mirrorMargins
+    ? styleOptions.innerMarginMm + styleOptions.outerMarginMm
+    : activeMargins.left + activeMargins.right;
+  const borderPadMm = config.hasPageBorder ? config.pageBorderPaddingMm * 2 : 0;
+  const innerWidthPx = Math.max(
+    180,
+    Math.floor((finalWidthMm - horizontalMarginMm - borderPadMm) * MM_TO_PX)
+  );
+
+  const host = document.createElement('div');
+  host.style.position = 'fixed';
+  host.style.left = '-100000px';
+  host.style.top = '0';
+  host.style.visibility = 'hidden';
+  host.style.pointerEvents = 'none';
+  host.style.zIndex = '-1';
+
+  const styleTag = document.createElement('style');
+  styleTag.textContent = `
+    .mps-offscreen-page {
+      box-sizing: border-box;
+      width: ${innerWidthPx}px;
+      font-family: ${styleOptions.activeFontCssFamily};
+      font-size: 11.5pt;
+      line-height: ${styleOptions.lineSpacing};
+      letter-spacing: ${styleOptions.letterSpacing};
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      overflow: hidden;
+      ${
+        styleOptions.columnCount > 1
+          ? `column-count: ${styleOptions.columnCount}; column-gap: 6mm;`
+          : ''
+      }
+    }
+    .mps-offscreen-page p {
+      margin-top: 0;
+      margin-bottom: ${styleOptions.paragraphGapPt}pt;
+      ${styleOptions.firstLineIndent ? 'text-indent: 6mm;' : ''}
+    }
+    .mps-offscreen-page p.mps-no-indent,
+    .mps-offscreen-page .mps-no-indent p,
+    .mps-offscreen-page .mps-chapter-start p,
+    .mps-offscreen-page p[style*="text-align: center"],
+    .mps-offscreen-page p[style*="text-align: right"] {
+      text-indent: 0 !important;
+    }
+    .mps-offscreen-page h1 { font-size: 1.65em; font-weight: 700; line-height: 1.3; margin: 0.25em 0 0.35em 0; }
+    .mps-offscreen-page h2 { font-size: 1.35em; font-weight: 700; line-height: 1.35; margin: 0.25em 0 0.3em 0; }
+    .mps-offscreen-page h3 { font-size: 1.15em; font-weight: 600; line-height: 1.4; margin: 0.2em 0 0.25em 0; }
+    .mps-offscreen-page ul, .mps-offscreen-page ol { padding-left: 1.4em; margin: 0.35em 0; }
+    .mps-offscreen-page table:not(.mps-toc-table) { width: 100%; border-collapse: collapse; margin: 0.55em 0; }
+    .mps-offscreen-page table:not(.mps-toc-table) th, .mps-offscreen-page table:not(.mps-toc-table) td { border: 1pt solid #374151; padding: 5px 8px; }
+    .mps-offscreen-page img { max-width: 100%; height: auto; }
+    .mps-offscreen-page .mps-callout-box { border: 1pt solid #94A3B8; padding: 10px 14px; margin: 10px 0; border-radius: 6px; }
+    .mps-offscreen-page .mps-drop-cap-char { float: left; font-size: 3.1em; line-height: 0.88; font-weight: 700; padding-right: 0.16em; }
+    .mps-offscreen-page .mps-footnotes-section { margin-top: 14px; padding-top: 8px; border-top: 0.8pt solid #9CA3AF; font-size: 8.8pt; }
+    .mps-offscreen-page figure.mps-figure { margin: 8px 0; max-width: 100%; }
+  `;
+  host.appendChild(styleTag);
+  document.body.appendChild(host);
+
+  try {
+    const pages: HTMLDivElement[] = [];
+    const createOffscreenPage = (idx: number): HTMLDivElement => {
+      const div = document.createElement('div');
+      div.className = 'mps-offscreen-page';
+      const usableH = calculateUsablePageHeightPx(config, idx, false);
+      div.style.height = `${usableH}px`;
+      host.appendChild(div);
+      return div;
+    };
+
+    const first = createOffscreenPage(0);
+    first.innerHTML = combinedHtml || '<p><br/></p>';
+    pages.push(first);
+
+    // Iteratively allocate & paginate up to 120 pages max
+    for (let pass = 0; pass < 120; pass++) {
+      const { neededPageCount, didMutateDom } = runZeroCutoffPaginationPass(
+        pages,
+        pages.length,
+        config,
+        false
+      );
+
+      if (neededPageCount > pages.length) {
+        while (pages.length < neededPageCount) {
+          pages.push(createOffscreenPage(pages.length));
+        }
+        continue;
+      }
+
+      if (neededPageCount < pages.length) {
+        while (pages.length > neededPageCount) {
+          const removed = pages.pop();
+          removed?.remove();
+        }
+      }
+
+      if (!didMutateDom) {
+        break;
+      }
+    }
+
+    return pages.map((p) => p.innerHTML);
+  } finally {
+    host.remove();
+  }
 }
